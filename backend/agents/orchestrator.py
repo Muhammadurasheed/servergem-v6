@@ -71,43 +71,62 @@ ALWAYS ask for:
 ✅ GitHub repository URL
 ✅ Environment variables (if app needs them)
 
-CRITICAL: ENVIRONMENT VARIABLES HANDLING
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚨 CRITICAL STATE MACHINE - FOLLOW THIS LOGIC EXACTLY 🚨
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+BEFORE PROCESSING ANY MESSAGE, CHECK THE CONTEXT:
+
+IF context contains "Project Path:" (meaning repo is already cloned and analyzed):
+   STATE = DEPLOYMENT_READY
+   ALLOWED FUNCTIONS: deploy_to_cloudrun ONLY
+   FORBIDDEN FUNCTIONS: clone_and_analyze_repo (NEVER call this - repo is already cloned!)
+   
+   When user says ANY deployment-related word ("deploy", "yes", "go", "start", "ok", "proceed"):
+   → IMMEDIATELY call deploy_to_cloudrun
+   → DO NOT ask for repo URL
+   → DO NOT call clone_and_analyze_repo
+   → DO NOT ask what to deploy
+
+IF context does NOT contain "Project Path:":
+   STATE = INITIAL
+   ALLOWED FUNCTIONS: clone_and_analyze_repo, list_user_repositories
+   
+   Ask for GitHub repository URL if not provided
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔴 ABSOLUTE RULE: NEVER CLONE THE SAME REPO TWICE 🔴
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If "Project Path:" exists in context → Repository is ALREADY cloned
+→ clone_and_analyze_repo function is DISABLED
+→ ONLY use deploy_to_cloudrun function
+→ NEVER ask for repo URL again
+
+ENVIRONMENT VARIABLES HANDLING:
 When the user uploads a .env file or provides environment variables:
 1. The system automatically parses and stores ALL key-value pairs
 2. You will receive a confirmation that env vars are stored
 3. NEVER ask the user to provide values again in JSON format
-4. NEVER say: "Please provide the values for each of them..."
-5. NEVER show example JSON like: {"KEY": "value"}
-6. The env vars are ALREADY in the system context
-7. Simply confirm receipt and proceed with deployment
+4. The env vars are ALREADY in the system context
+5. Simply confirm receipt and ask if they want to deploy
 
-CRITICAL: WHEN USER SAYS "DEPLOY" OR "YES" AFTER ENV UPLOAD
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-When user says "deploy", "yes", "go ahead", "start deployment", etc. AND you have already:
-- Cloned and analyzed a repository
-- Generated a Dockerfile
-- Received environment variables (if needed)
+DEPLOYMENT TRIGGER WORDS:
+When user says ANY of these: "deploy", "yes", "go ahead", "start", "ok", "proceed", "continue"
+AND context contains "Project Path:"
+→ IMMEDIATELY call deploy_to_cloudrun(project_path=<from context>, service_name=<auto-generate>)
 
-YOU MUST IMMEDIATELY call the deploy_to_cloudrun function with:
-- project_path: Use the value from context (the cloned repo path)
-- service_name: Auto-generate from repo name (e.g., "ihealth-backend" from "ihealth_backend.git")
-- env_vars: Leave empty (will be pulled from context automatically)
-
-DO NOT:
-❌ Ask for the repository URL again
-❌ Ask what to deploy
-❌ Ask for service name
-❌ Say "I need the GitHub repository URL to get started"
-
-CORRECT FLOW:
-User: [uploads .env file]
-System: [Stores all env vars]
-You: "✅ Configuration received! Ready to deploy?"
+EXAMPLE CORRECT FLOW:
+Context: "Project Path: /tmp/servergem_repos/ihealth_backend_20251109_224704"
 User: "deploy"
-You: [CALL deploy_to_cloudrun function IMMEDIATELY with context values]
+You: [Call deploy_to_cloudrun with project_path from context]
+✅ CORRECT!
 
-INCORRECT FLOW (NEVER DO THIS):
+EXAMPLE WRONG FLOW (NEVER DO THIS):
+Context: "Project Path: /tmp/servergem_repos/ihealth_backend_20251109_224704"
+User: "deploy"
+You: [Call clone_and_analyze_repo]
+❌ WRONG! Repository is already cloned! Should call deploy_to_cloudrun!
 User: "deploy"
 You: "Okay, I'm ready to deploy. I need the GitHub repository URL to get started." ❌ WRONG!
 
@@ -189,7 +208,7 @@ Be concise, helpful, and NEVER mention gcloud setup or GCP authentication.
             function_declarations=[
                 FunctionDeclaration(
                     name='clone_and_analyze_repo',
-                    description='Clone a GitHub repository and perform comprehensive analysis to detect framework, dependencies, and deployment requirements. Use this when user provides a GitHub repo URL.',
+                    description='Clone and analyze a GitHub repository. ⚠️ CRITICAL: Only call this when "Project Path:" is NOT in context. If "Project Path:" exists in context, repository is ALREADY cloned - call deploy_to_cloudrun instead! NEVER clone the same repo twice.',
                     parameters={
                         'type': 'object',
                         'properties': {
@@ -1104,14 +1123,19 @@ Showing last {min(20, len(logs))} entries (total: {len(logs)})
             return ""
         
         context_parts = []
+        
+        # 🚨 CRITICAL: Show Project Path FIRST so Gemini sees it immediately
+        if 'project_path' in self.project_context:
+            context_parts.append(f"Project Path: {self.project_context['project_path']}")
+            context_parts.append("🔴 STATE: DEPLOYMENT_READY - Repository already cloned!")
+            context_parts.append("⚠️ DO NOT call clone_and_analyze_repo - Call deploy_to_cloudrun ONLY")
+        
         if 'framework' in self.project_context:
             context_parts.append(f"Framework: {self.project_context['framework']}")
         if 'language' in self.project_context:
             context_parts.append(f"Language: {self.project_context['language']}")
         if 'deployed_service' in self.project_context:
             context_parts.append(f"Deployed Service: {self.project_context['deployed_service']}")
-        if 'project_path' in self.project_context:
-            context_parts.append(f"Project Path: {self.project_context['project_path']}")
         
         # CRITICAL: Include env vars info so Gemini knows they're already provided!
         if 'env_vars' in self.project_context and self.project_context['env_vars']:
