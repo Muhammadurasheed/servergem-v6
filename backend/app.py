@@ -334,13 +334,14 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
                     for key, val in session_env_vars.items()
                 ])
                 
-                confirmation_msg = f"""✅ Perfect! I've received your environment variables:
+                confirmation_msg = f"""✅ Configuration received successfully!
 
+**Uploaded:**
 {env_list}
 
 All secrets will be stored securely in Google Secret Manager.
 
-Ready to deploy? Just say 'deploy' or 'yes'!"""
+**Next Step:** Say 'deploy' or 'yes' to start deployment!"""
                 
                 await safe_send_json(session_id, {
                     'type': 'message',

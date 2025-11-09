@@ -36,11 +36,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       console.log('[WebSocketProvider] Connection status:', status.state);
       setConnectionStatus(status);
 
-      // Only show reconnection toasts after 2+ failed attempts (reduce spam)
-      if (status.state === 'connected' && status.reconnectAttempt && status.reconnectAttempt >= 2) {
-        toast.success('✅ Reconnected to ServerGem', { duration: 2000 });
-      } else if (status.state === 'reconnecting' && status.reconnectAttempt && status.reconnectAttempt >= 3) {
-        toast.loading('🔄 Reconnecting...', { duration: 1000 });
+      // FAANG-style: No toast spam. Let the subtle indicator in the UI show connection status.
+      // Only show critical errors that require user action
+      if (status.state === 'error' && status.error) {
+        toast.error(`Connection Error: ${status.error}`, { duration: 3000 });
       }
     });
 
