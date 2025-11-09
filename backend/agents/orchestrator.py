@@ -69,8 +69,7 @@ NEVER ask users for:
 
 ALWAYS ask for:
 ✅ GitHub repository URL
-✅ Service name (suggest based on repo name)
-✅ Environment variables (if needed for the app)
+✅ Environment variables (if app needs them)
 
 CRITICAL: ENVIRONMENT VARIABLES HANDLING
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -83,20 +82,38 @@ When the user uploads a .env file or provides environment variables:
 6. The env vars are ALREADY in the system context
 7. Simply confirm receipt and proceed with deployment
 
-CORRECT FLOW AFTER ENV UPLOAD:
+CRITICAL: WHEN USER SAYS "DEPLOY" OR "YES" AFTER ENV UPLOAD
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+When user says "deploy", "yes", "go ahead", "start deployment", etc. AND you have already:
+- Cloned and analyzed a repository
+- Generated a Dockerfile
+- Received environment variables (if needed)
+
+YOU MUST IMMEDIATELY call the deploy_to_cloudrun function with:
+- project_path: Use the value from context (the cloned repo path)
+- service_name: Auto-generate from repo name (e.g., "ihealth-backend" from "ihealth_backend.git")
+- env_vars: Leave empty (will be pulled from context automatically)
+
+DO NOT:
+❌ Ask for the repository URL again
+❌ Ask what to deploy
+❌ Ask for service name
+❌ Say "I need the GitHub repository URL to get started"
+
+CORRECT FLOW:
 User: [uploads .env file]
-System: [Stores all env vars with values]
-You: "✅ Received your environment variables. Ready to deploy!"
+System: [Stores all env vars]
+You: "✅ Configuration received! Ready to deploy?"
 User: "deploy"
-You: [Use stored env vars from context to deploy]
+You: [CALL deploy_to_cloudrun function IMMEDIATELY with context values]
 
 INCORRECT FLOW (NEVER DO THIS):
-User: [uploads .env file]
-You: "Please provide the values for each variable in JSON format..." ❌ WRONG!
+User: "deploy"
+You: "Okay, I'm ready to deploy. I need the GitHub repository URL to get started." ❌ WRONG!
 
 DEPLOYMENT FLOW:
 1. User provides GitHub repo URL
-2. You clone and analyze the repository
+2. You call clone_and_analyze_repo function
 3. You generate optimal Dockerfile
 4. You deploy to ServerGem's Cloud Run infrastructure
 5. You provide custom URL: https://{service-name}.servergem.app
@@ -190,21 +207,21 @@ Be concise, helpful, and NEVER mention gcloud setup or GCP authentication.
                 ),
                 FunctionDeclaration(
                     name='deploy_to_cloudrun',
-                    description='Deploy an analyzed project to Google Cloud Run. Generates Dockerfile, builds image via Cloud Build, and deploys the service. Use this after analyzing a repository.',
+                    description='Deploy an analyzed project to Google Cloud Run. CRITICAL: Use this function IMMEDIATELY when user says "deploy", "yes", "go ahead", "start", etc. AND context contains project_path (meaning repo was already analyzed). Auto-generate service_name from repo name. Environment variables are automatically loaded from context.',
                     parameters={
                         'type': 'object',
                         'properties': {
                             'project_path': {
                                 'type': 'string',
-                                'description': 'Local path to the cloned project (from project_context)'
+                                'description': 'Local path to the cloned project. Use value from project_context that was set during clone_and_analyze_repo.'
                             },
                             'service_name': {
                                 'type': 'string',
-                                'description': 'Name for the Cloud Run service (lowercase, hyphens allowed)'
+                                'description': 'Name for Cloud Run service. Auto-generate from repo name (e.g., "ihealth-backend" from "ihealth_backend.git"). Use lowercase and hyphens.'
                             },
                             'env_vars': {
                                 'type': 'object',
-                                'description': 'Environment variables as key-value pairs (optional)'
+                                'description': 'Leave empty - environment variables are automatically loaded from context'
                             }
                         },
                         'required': ['project_path', 'service_name']
@@ -607,9 +624,10 @@ Be concise, helpful, and NEVER mention gcloud setup or GCP authentication.
     
     async def _handle_deploy_to_cloudrun(
         self,
-        project_path: str,
-        service_name: str,
+        project_path: str = None,
+        service_name: str = None,
         env_vars: Optional[Dict] = None,
+        progress_notifier: Optional[ProgressNotifier] = None,
         progress_callback: Optional[Callable] = None
     ) -> Dict[str, Any]:
         """
@@ -622,6 +640,30 @@ Be concise, helpful, and NEVER mention gcloud setup or GCP authentication.
         - Monitoring and metrics
         - Structured logging
         """
+        
+        # CRITICAL: Use project_path from context if not provided
+        if not project_path and 'project_path' in self.project_context:
+            project_path = self.project_context['project_path']
+            print(f"[Orchestrator] Using project_path from context: {project_path}")
+        
+        if not project_path:
+            return {
+                'type': 'error',
+                'content': '❌ **No repository analyzed yet**\n\nPlease provide a GitHub repository URL first.',
+                'timestamp': datetime.now().isoformat()
+            }
+        
+        # CRITICAL: Auto-generate service_name if not provided
+        if not service_name:
+            # Extract from repo_url or project_path
+            repo_url = self.project_context.get('repo_url', '')
+            if repo_url:
+                # Extract repo name from URL (e.g., "ihealth_backend.git" -> "ihealth-backend")
+                repo_name = repo_url.split('/')[-1].replace('.git', '').replace('_', '-').lower()
+                service_name = repo_name
+                print(f"[Orchestrator] Auto-generated service_name: {service_name}")
+            else:
+                service_name = 'servergem-app'
         
         # CRITICAL: Use env_vars from project_context if not provided!
         if not env_vars and 'env_vars' in self.project_context and self.project_context['env_vars']:
