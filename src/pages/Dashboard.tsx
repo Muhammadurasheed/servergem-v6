@@ -20,7 +20,9 @@ import {
   Plus,
   Globe,
   Zap,
-  Loader2
+  Loader2,
+  ArrowLeft,
+  Home
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDeployments } from '@/hooks/useDeployments';
@@ -87,6 +89,19 @@ const Dashboard = () => {
   return (
     <DashboardLayout>
       <div className="container mx-auto px-4 py-8 max-w-7xl">
+        {/* Back Navigation */}
+        <div className="mb-6">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => navigate('/')}
+            className="gap-2"
+          >
+            <Home className="w-4 h-4" />
+            Back to Home
+          </Button>
+        </div>
+
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>

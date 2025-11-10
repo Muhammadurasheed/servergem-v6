@@ -39,7 +39,7 @@ ENV PATH=/home/appuser/.local/bin:$PATH
 ENV PORT=8080
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
-CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 {entry_point}:app
+CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 0 {entry_point}:app
 """,
             
             'python_fastapi': """# Multi-stage build for FastAPI
@@ -65,7 +65,7 @@ CMD ["uvicorn", "{entry_point}:app", "--host", "0.0.0.0", "--port", "8080"]
 FROM node:18-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci --only=production && npm cache clean --force
 COPY . .
 
 FROM node:18-alpine
@@ -147,11 +147,28 @@ CMD ["./main"]
         return await self._generate_custom_dockerfile(analysis)
     
     def _customize_template(self, template: str, analysis: Dict) -> str:
-        """Customize template with project-specific values"""
+        """Customize template with project-specific values - ROBUST"""
         
+        # Sanitize entry point - remove extensions and validate
         entry_point = analysis.get('entry_point', 'app')
-        if entry_point:
-            entry_point = entry_point.replace('.py', '').replace('.js', '')
+        if not entry_point or entry_point == 'unknown':
+            # Safe defaults per language
+            if 'python' in template.lower():
+                entry_point = 'app'
+            elif 'node' in template.lower():
+                entry_point = 'server.js'
+            else:
+                entry_point = 'main'
+        
+        # Clean entry point name
+        entry_point = str(entry_point).strip()
+        entry_point = entry_point.replace('.py', '').replace('.js', '').replace('.ts', '')
+        
+        # Ensure valid identifier (no spaces, special chars except underscore/hyphen)
+        entry_point = ''.join(c for c in entry_point if c.isalnum() or c in '_-.')
+        
+        if not entry_point:
+            entry_point = 'app'
         
         return template.replace('{entry_point}', entry_point)
     
