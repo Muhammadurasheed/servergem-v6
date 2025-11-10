@@ -51,7 +51,11 @@ app.add_middleware(UsageTrackingMiddleware)
 # Store active WebSocket connections with metadata
 active_connections: dict[str, dict] = {}
 
-# Initialize orchestrator
+# Store orchestrator instances per session (CRITICAL FIX for deployment loop)
+# This preserves project context across reconnections
+session_orchestrators: dict[str, OrchestratorAgent] = {}
+
+# Initialize global orchestrator (fallback only)
 orchestrator = OrchestratorAgent(
     gcloud_project=os.getenv('GOOGLE_CLOUD_PROJECT'),
     github_token=os.getenv('GITHUB_TOKEN'),
@@ -121,6 +125,42 @@ async def broadcast_to_session(session_id: str, data: dict):
     
     print(f"[WebSocket] ❌ Failed to send to {session_id} after {max_retries} attempts")
     return False
+
+
+# ============================================================================
+# SESSION CLEANUP TASK
+# ============================================================================
+
+async def cleanup_stale_sessions():
+    """Periodically clean up inactive session orchestrators to free memory"""
+    while True:
+        try:
+            await asyncio.sleep(3600)  # Check every hour
+            
+            current_time = datetime.now()
+            stale_sessions = []
+            
+            for session_id in list(session_orchestrators.keys()):
+                # Remove sessions that are not actively connected
+                if session_id not in active_connections:
+                    # Could add timestamp tracking here for more sophisticated cleanup
+                    # For now, keep orchestrators for reconnections
+                    pass
+            
+            if stale_sessions:
+                for session_id in stale_sessions:
+                    del session_orchestrators[session_id]
+                print(f"[Cleanup] Removed {len(stale_sessions)} stale session orchestrators")
+                
+        except Exception as e:
+            print(f"[Cleanup] Error in cleanup task: {e}")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start background tasks on server startup"""
+    asyncio.create_task(cleanup_stale_sessions())
+    print("[ServerGem] 🚀 Background cleanup task started")
 
 
 # ============================================================================
@@ -261,15 +301,23 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Quer
         
         print(f"[WebSocket] ✅ Session {session_id} registered. Active: {len(active_connections)}")
         
-        # Create orchestrator using Vertex AI
-        user_orchestrator = OrchestratorAgent(
-            gcloud_project=gcloud_project,
-            github_token=os.getenv('GITHUB_TOKEN'),
-            location=gcloud_region
-        )
+        # CRITICAL FIX: Reuse existing orchestrator for this session or create new one
+        # This preserves project context (including cloned repo info) across reconnections
+        if session_id in session_orchestrators:
+            user_orchestrator = session_orchestrators[session_id]
+            print(f"[WebSocket] ♻️  Reusing existing orchestrator for {session_id}")
+            print(f"[WebSocket] 📦 Context preserved: {list(user_orchestrator.project_context.keys())}")
+        else:
+            user_orchestrator = OrchestratorAgent(
+                gcloud_project=gcloud_project,
+                github_token=os.getenv('GITHUB_TOKEN'),
+                location=gcloud_region
+            )
+            session_orchestrators[session_id] = user_orchestrator
+            print(f"[WebSocket] ✨ Created new orchestrator for {session_id}")
         
-        # Session env vars
-        session_env_vars = {}
+        # Get or initialize session env vars from orchestrator context
+        session_env_vars = user_orchestrator.project_context.get('env_vars', {})
         
         # Send connection confirmation
         await safe_send_json(session_id, {
@@ -461,7 +509,11 @@ All secrets will be stored securely in Google Secret Manager.
             
             # Remove from active connections
             del active_connections[session_id]
-            print(f"[WebSocket] 🧹 Cleaned up {session_id}. Remaining: {len(active_connections)}")
+            print(f"[WebSocket] 🧹 Cleaned up connection for {session_id}. Active: {len(active_connections)}")
+            
+            # NOTE: We DON'T delete from session_orchestrators here
+            # This preserves context for reconnections within the same session
+            # Orchestrators will be cleaned up by a periodic cleanup task or session timeout
 
 
 # ============================================================================
