@@ -276,100 +276,349 @@ Be concise, helpful, and NEVER mention gcloud setup or GCP authentication.
             ]
         )
     
-    async def process_message(
-        self, 
-        user_message: str, 
-        session_id: str, 
-        progress_notifier: Optional[ProgressNotifier] = None,
-        progress_callback: Optional[Callable] = None,
-        safe_send: Optional[Callable] = None
-    ) -> Dict[str, Any]:
-        """
-        Main entry point: processes user message with Gemini ADK function calling
+    """
+FIXED: Real-time progress during analysis
+Key changes:
+1. Store safe_send and session_id as instance variables early
+2. Create robust progress callback that handles all error cases
+3. Pass progress through entire chain with proper async handling
+"""
+
+async def process_message(
+    self, 
+    user_message: str, 
+    session_id: str, 
+    progress_notifier: Optional[ProgressNotifier] = None,
+    progress_callback: Optional[Callable] = None,
+    safe_send: Optional[Callable] = None
+) -> Dict[str, Any]:
+    """
+    Main entry point: processes user message with Gemini ADK function calling
+    
+    CRITICAL FIX: Store safe_send IMMEDIATELY before any async operations
+    """
+    
+    # ✅ FIX 1: Store these BEFORE any async operations
+    self.session_id = session_id
+    self.safe_send = safe_send
+    
+    # Initialize chat session if needed
+    if not self.chat_session:
+        self.chat_session = self.model.start_chat(history=[])
+    
+    # Add project context to enhance Gemini's understanding
+    context_prefix = self._build_context_prefix()
+    enhanced_message = (
+        f"{context_prefix}\n\nUser: {user_message}" 
+        if context_prefix 
+        else user_message
+    )
+    
+    try:
+        # Send to Gemini with function calling enabled
+        response = self.chat_session.send_message(enhanced_message)
         
-        Args:
-            user_message: User's chat message
-            session_id: Session identifier
-            progress_notifier: Optional progress notifier for deployment tracking
-            progress_callback: Optional async callback for real-time updates
-            safe_send: Optional callback to send messages to client (for progress during analysis)
-        """
-        
-        # Store for use in helper methods
-        self.session_id = session_id
-        self.safe_send = safe_send
-        
-        # Initialize chat session if needed
-        if not self.chat_session:
-            self.chat_session = self.model.start_chat(history=[])
-        
-        # Add project context to enhance Gemini's understanding
-        context_prefix = self._build_context_prefix()
-        enhanced_message = (
-            f"{context_prefix}\n\nUser: {user_message}" 
-            if context_prefix 
-            else user_message
-        )
-        
-        try:
-            # Send to Gemini with function calling enabled
-            # Note: send_message is synchronous, no need for asyncio.to_thread
-            response = self.chat_session.send_message(enhanced_message)
-            
-            # Check if Gemini wants to call a function
-            if hasattr(response, 'candidates') and response.candidates:
-                candidate = response.candidates[0]
-                if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
-                    for part in candidate.content.parts:
-                        if hasattr(part, 'function_call') and part.function_call:
-                            # Route to real service handler
-                            function_result = await self._handle_function_call(
-                                part.function_call,
-                                progress_notifier=progress_notifier,
-                                progress_callback=progress_callback
+        # Check if Gemini wants to call a function
+        if hasattr(response, 'candidates') and response.candidates:
+            candidate = response.candidates[0]
+            if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                for part in candidate.content.parts:
+                    if hasattr(part, 'function_call') and part.function_call:
+                        # Route to real service handler
+                        function_result = await self._handle_function_call(
+                            part.function_call,
+                            progress_notifier=progress_notifier,
+                            progress_callback=progress_callback
+                        )
+                        
+                        # Send function result back to Gemini
+                        final_response = self.chat_session.send_message(
+                            Part.from_function_response(
+                                name=part.function_call.name,
+                                response=function_result
                             )
-                            
-                            # Send function result back to Gemini using Part.from_function_response
-                            final_response = self.chat_session.send_message(
-                                Part.from_function_response(
-                                    name=part.function_call.name,
-                                    response=function_result
-                                )
-                            )
-                            
-                            # Extract text from final response
-                            response_text = self._extract_text_from_response(final_response)
-                            
-                            # Return combined result - pass through ALL fields from function_result
-                            return {
-                                'type': function_result.get('type', 'message'),
-                                'content': response_text or function_result.get('content', ''),
-                                'data': function_result.get('data'),
-                                'actions': function_result.get('actions'),
-                                'deployment_url': function_result.get('deployment_url'),
-                                'request_env_vars': function_result.get('request_env_vars', False),  # CRITICAL for env vars UI
-                                'detected_env_vars': function_result.get('detected_env_vars', []),  # Detected env var names
-                                'timestamp': datetime.now().isoformat()
-                            }
-            
-            # Regular text response (no function call needed)
-            response_text = self._extract_text_from_response(response)
-            
-            return {
-                'type': 'message',
-                'content': response_text if response_text else 'I received your message but couldn\'t generate a response. Please try again.',
-                'timestamp': datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            print(f"[Orchestrator] Error: {str(e)}")
-            import traceback
-            traceback.print_exc()
+                        )
+                        
+                        # Extract text from final response
+                        response_text = self._extract_text_from_response(final_response)
+                        
+                        # ✅ FIX 2: Preserve ALL fields from function_result
+                        return {
+                            'type': function_result.get('type', 'message'),
+                            'content': response_text or function_result.get('content', ''),
+                            'data': function_result.get('data'),
+                            'actions': function_result.get('actions'),
+                            'deployment_url': function_result.get('deployment_url'),
+                            'request_env_vars': function_result.get('request_env_vars', False),
+                            'detected_env_vars': function_result.get('detected_env_vars', []),
+                            'timestamp': datetime.now().isoformat()
+                        }
+        
+        # Regular text response (no function call needed)
+        response_text = self._extract_text_from_response(response)
+        
+        return {
+            'type': 'message',
+            'content': response_text if response_text else 'I received your message but couldn\'t generate a response. Please try again.',
+            'timestamp': datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        print(f"[Orchestrator] Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'type': 'error',
+            'content': f'❌ Error processing message: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        }
+
+
+async def _handle_clone_and_analyze(
+    self, 
+    repo_url: str, 
+    branch: str = 'main', 
+    progress_notifier: Optional[ProgressNotifier] = None,
+    progress_callback: Optional[Callable] = None
+) -> Dict[str, Any]:
+    """
+    Clone GitHub repo and analyze it - FIXED with real-time progress
+    """
+    
+    try:
+        # STAGE 1: Repository Cloning
+        if progress_notifier:
+            await progress_notifier.start_stage(
+                DeploymentStages.REPO_CLONE,
+                "📦 Cloning repository from GitHub..."
+            )
+        
+        # ✅ FIX 3: Send progress even without progress_notifier
+        await self._send_progress_message("📦 Cloning repository from GitHub...")
+        
+        clone_result = self.github_service.clone_repository(repo_url, branch)
+        
+        if not clone_result.get('success'):
+            if progress_notifier:
+                await progress_notifier.fail_stage(
+                    DeploymentStages.REPO_CLONE,
+                    f"Failed to clone: {clone_result.get('error')}",
+                    details={"error": clone_result.get('error')}
+                )
             return {
                 'type': 'error',
-                'content': f'❌ Error processing message: {str(e)}',
+                'content': f"❌ **Failed to clone repository**\n\n{clone_result.get('error')}\n\nPlease check:\n• Repository URL is correct\n• You have access to the repository\n• GitHub token has proper permissions",
                 'timestamp': datetime.now().isoformat()
             }
+        
+        project_path = clone_result['local_path']
+        self.project_context['project_path'] = project_path
+        self.project_context['repo_url'] = repo_url
+        self.project_context['branch'] = branch
+        
+        if progress_notifier:
+            await progress_notifier.complete_stage(
+                DeploymentStages.REPO_CLONE,
+                f"✅ Repository cloned ({clone_result['files_count']} files)",
+                details={
+                    "repo_name": clone_result['repo_name'],
+                    "files": clone_result['files_count'],
+                    "size": f"{clone_result['size_mb']} MB"
+                }
+            )
+        
+        await self._send_progress_message(f"✅ Repository cloned: {clone_result['repo_name']} ({clone_result['files_count']} files)")
+        
+        # Step 2: Analyze project with FIXED progress callback
+        if progress_notifier:
+            await progress_notifier.start_stage(
+                DeploymentStages.CODE_ANALYSIS,
+                "🔍 Analyzing project structure and dependencies..."
+            )
+        
+        await self._send_progress_message("🔍 Analyzing project structure and dependencies...")
+        
+        # ✅ FIX 4: Robust progress callback with error handling
+        async def analysis_progress(message: str):
+            """Send progress updates during analysis with fallbacks"""
+            try:
+                # Try progress notifier first
+                if progress_notifier:
+                    await progress_notifier.send_update(
+                        DeploymentStages.CODE_ANALYSIS,
+                        "in-progress",
+                        message
+                    )
+                
+                # Always try direct WebSocket send as backup
+                await self._send_progress_message(message)
+                
+            except Exception as e:
+                print(f"[Orchestrator] Progress callback error: {e}")
+                # Don't fail the analysis if progress update fails
+        
+        try:
+            analysis_result = await self.analysis_service.analyze_and_generate(
+                project_path,
+                progress_callback=analysis_progress  # Pass the fixed callback
+            )
+        except Exception as e:
+            error_msg = str(e)
+            # Check if it's a quota error
+            if '429' in error_msg or 'quota' in error_msg.lower() or 'resource exhausted' in error_msg.lower():
+                if progress_notifier:
+                    await progress_notifier.fail_stage(
+                        DeploymentStages.CODE_ANALYSIS,
+                        "❌ API Quota Exceeded",
+                        details={"error": "Gemini API quota limit reached"}
+                    )
+                raise Exception(f"🚨 Gemini API Quota Exceeded. Please check your API quota at https://ai.google.dev/ and try again later.")
+            else:
+                raise e
+        
+        if not analysis_result.get('success'):
+            if progress_notifier:
+                await progress_notifier.fail_stage(
+                    DeploymentStages.CODE_ANALYSIS,
+                    f"Analysis failed: {analysis_result.get('error')}",
+                    details={"error": analysis_result.get('error')}
+                )
+            return {
+                'type': 'error',
+                'content': f"❌ **Analysis failed**\n\n{analysis_result.get('error')}",
+                'timestamp': datetime.now().isoformat()
+            }
+        
+        analysis_data = analysis_result['analysis']
+        
+        if progress_notifier:
+            await progress_notifier.complete_stage(
+                DeploymentStages.CODE_ANALYSIS,
+                f"✅ Analysis complete: {analysis_data['framework']} detected",
+                details={
+                    "framework": analysis_data['framework'],
+                    "language": analysis_data['language'],
+                    "dependencies": analysis_data.get('dependencies_count', 0)
+                }
+            )
+        
+        await self._send_progress_message(f"✅ Analysis complete: {analysis_data['framework']} detected")
+        
+        # Step 3: Generate and save Dockerfile
+        if progress_notifier:
+            await progress_notifier.start_stage(
+                DeploymentStages.DOCKERFILE_GEN,
+                "🐳 Generating optimized Dockerfile..."
+            )
+        
+        await self._send_progress_message("🐳 Generating optimized Dockerfile...")
+        
+        dockerfile_save = self.docker_service.save_dockerfile(
+            analysis_result['dockerfile']['content'],
+            project_path
+        )
+        
+        if progress_notifier:
+            await progress_notifier.complete_stage(
+                DeploymentStages.DOCKERFILE_GEN,
+                "✅ Dockerfile generated with optimizations",
+                details={
+                    "path": dockerfile_save.get('path', f'{project_path}/Dockerfile'),
+                    "optimizations": len(analysis_result['dockerfile'].get('optimizations', []))
+                }
+            )
+        
+        await self._send_progress_message("✅ Dockerfile generated with optimizations")
+        
+        # Step 4: Create .dockerignore
+        self.docker_service.create_dockerignore(
+            project_path,
+            analysis_result['analysis']['language']
+        )
+        
+        # Store analysis in context
+        self.project_context['analysis'] = analysis_result['analysis']
+        self.project_context['framework'] = analysis_result['analysis']['framework']
+        self.project_context['language'] = analysis_result['analysis']['language']
+        self.project_context['env_vars_required'] = len(analysis_result['analysis'].get('env_vars', [])) > 0
+        
+        # Format beautiful response
+        content = self._format_analysis_response(
+            analysis_result, 
+            dockerfile_save, 
+            repo_url
+        )
+        
+        # CHECK IF ENV VARS ARE NEEDED
+        env_vars_detected = analysis_result['analysis'].get('env_vars', [])
+        needs_env_vars = len(env_vars_detected) > 0
+        
+        if needs_env_vars:
+            content += f"\n\n⚙️ **Environment Variables Detected:** {len(env_vars_detected)}\n"
+            content += "\nYour application requires environment variables. Please provide them to continue with deployment."
+            
+            # ✅ FIX 5: Return with proper structure for env vars UI
+            return {
+                'type': 'analysis',
+                'content': content,
+                'data': analysis_result,
+                'request_env_vars': True,  # Frontend will show UI
+                'detected_env_vars': env_vars_detected,
+                'timestamp': datetime.now().isoformat()
+            }
+        else:
+            return {
+                'type': 'analysis',
+                'content': content,
+                'data': analysis_result,
+                'actions': [
+                    {
+                        'id': 'deploy',
+                        'label': '🚀 Deploy to Cloud Run',
+                        'type': 'button',
+                        'action': 'deploy'
+                    },
+                    {
+                        'id': 'view_dockerfile',
+                        'label': '📄 View Dockerfile',
+                        'type': 'button',
+                        'action': 'view_dockerfile'
+                    }
+                ],
+                'timestamp': datetime.now().isoformat()
+            }
+        
+    except Exception as e:
+        print(f"[Orchestrator] Clone and analyze error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'type': 'error',
+            'content': f'❌ **Analysis failed**\n\n```\n{str(e)}\n```\n\nPlease try again or check the logs.',
+            'timestamp': datetime.now().isoformat()
+        }
+
+
+async def _send_progress_message(self, message: str):
+    """
+    ✅ FIX 6: Robust helper to send progress messages
+    """
+    if not self.safe_send or not self.session_id:
+        print(f"[Orchestrator] ⚠️ Cannot send progress: safe_send={bool(self.safe_send)}, session_id={bool(self.session_id)}")
+        return
+    
+    try:
+        await self.safe_send(self.session_id, {
+            'type': 'message',
+            'data': {
+                'content': message,
+                'metadata': {'type': 'progress'}
+            },
+            'timestamp': datetime.now().isoformat()
+        })
+        print(f"[Orchestrator] ✅ Sent progress: {message[:50]}...")
+    except Exception as e:
+        print(f"[Orchestrator] ❌ Error sending progress: {e}")
     
     def _extract_text_from_response(self, response) -> str:
         """Extract text content from Gemini response"""
