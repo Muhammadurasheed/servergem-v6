@@ -91,6 +91,8 @@ class GCloudService:
             'build_times': [],
             'deploy_times': []
         }
+        self.gcloud_available = False
+        self.docker_available = False
         
         # Configure logger with correlation ID
         self.logger = logging.LoggerAdapter(
@@ -102,6 +104,27 @@ class GCloudService:
             raise ValueError('GOOGLE_CLOUD_PROJECT environment variable required')
         
         self.logger.info(f"Initialized GCloudService for project: {self.project_id}")
+        
+        # Check if required tools are installed
+        self._check_required_tools()
+    
+    def _check_required_tools(self):
+        """Check if gcloud and docker are installed"""
+        import shutil
+        
+        # Check gcloud CLI
+        self.gcloud_available = shutil.which('gcloud') is not None
+        if self.gcloud_available:
+            self.logger.info("✅ gcloud CLI is installed")
+        else:
+            self.logger.warning("⚠️  gcloud CLI not found in PATH")
+        
+        # Check Docker
+        self.docker_available = shutil.which('docker') is not None
+        if self.docker_available:
+            self.logger.info("✅ Docker is installed")
+        else:
+            self.logger.warning("⚠️  Docker not found in PATH")
     
     def _generate_correlation_id(self) -> str:
         """Generate unique correlation ID for request tracking"""
@@ -145,6 +168,30 @@ class GCloudService:
             progress_callback: Optional async callback for progress updates
             build_config: Optional build configuration (timeout, machine_type, etc.)
         """
+        # Check if gcloud is available
+        if not self.gcloud_available:
+            error_msg = (
+                "❌ **Google Cloud CLI (gcloud) is not installed**\n\n"
+                "To deploy to Cloud Run, you need to install the gcloud CLI:\n\n"
+                "**Windows:**\n"
+                "1. Download from: https://cloud.google.com/sdk/docs/install\n"
+                "2. Run the installer\n"
+                "3. Restart your terminal/command prompt\n"
+                "4. Run: `gcloud init`\n\n"
+                "**macOS/Linux:**\n"
+                "```bash\n"
+                "curl https://sdk.cloud.google.com | bash\n"
+                "exec -l $SHELL\n"
+                "gcloud init\n"
+                "```\n\n"
+                "After installation, restart the backend server."
+            )
+            self.logger.error("gcloud CLI not found")
+            return {
+                'success': False,
+                'error': error_msg
+            }
+        
         start_time = time.time()
         self.metrics['builds']['total'] += 1
         
@@ -335,6 +382,18 @@ class GCloudService:
             progress_callback: Optional async callback for progress updates
             user_id: User identifier for service isolation
         """
+        # Check if gcloud is available
+        if not self.gcloud_available:
+            error_msg = (
+                "❌ **Google Cloud CLI (gcloud) is not installed**\n\n"
+                "Please install gcloud CLI first. See the build error message for installation instructions."
+            )
+            self.logger.error("gcloud CLI not found")
+            return {
+                'success': False,
+                'error': error_msg
+            }
+        
         try:
             # Generate unique service name for user isolation
             unique_service_name = f"{user_id}-{service_name}" if user_id else service_name
