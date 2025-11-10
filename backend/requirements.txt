@@ -3,11 +3,13 @@ fastapi==0.115.0
 uvicorn[standard]==0.32.0
 websockets==12.0
 
-# Google Cloud APIs (No CLI Required)
+# Google Cloud APIs (Production-Grade with Resource Management)
 google-cloud-aiplatform==1.71.1
 google-cloud-build==3.25.0
 google-cloud-run==0.10.7
 google-cloud-storage==2.18.2
+google-cloud-resource-manager==1.13.1  # ✅ PHASE 3: For pre-flight checks
+google-cloud-artifact-registry==1.12.0  # ✅ PHASE 3: Auto-create registries
 google-generativeai==0.10.1  # ✅ v1 API with gemini-1.5-flash support
 
 # HTTP Client & Async

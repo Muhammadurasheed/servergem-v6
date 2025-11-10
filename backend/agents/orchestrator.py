@@ -888,6 +888,39 @@ Env vars auto-parsed from .env. Never clone twice.
             
             self.monitoring.record_stage(deployment_id, 'validation', 'success', 0.5)
             
+            # ✅ PHASE 3: Pre-flight GCP checks
+            if progress_callback:
+                await progress_callback({
+                    'type': 'message',
+                    'data': {'content': '🔍 Running pre-flight checks...'}
+                })
+            
+            preflight_result = await self.gcloud_service.preflight_checks(
+                progress_callback=lambda msg: progress_callback({
+                    'type': 'message',
+                    'data': {'content': msg}
+                }) if progress_callback else None
+            )
+            
+            if not preflight_result['success']:
+                error_details = '\n'.join(f"• {err}" for err in preflight_result['errors'])
+                return {
+                    'type': 'error',
+                    'content': f"❌ **Pre-flight checks failed**\n\n{error_details}\n\n" +
+                               "Please ensure:\n" +
+                               "• Cloud Build API is enabled\n" +
+                               "• Cloud Run API is enabled\n" +
+                               "• Artifact Registry is set up\n" +
+                               "• Service account has required permissions",
+                    'timestamp': datetime.now().isoformat()
+                }
+            
+            if progress_callback:
+                await progress_callback({
+                    'type': 'message',
+                    'data': {'content': '✅ All pre-flight checks passed'}
+                })
+            
             # SERVERGEM ARCHITECTURE: No user GCP auth needed
             # Step 1: Validate Dockerfile exists
             dockerfile_check = self.docker_service.validate_dockerfile(project_path)

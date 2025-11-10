@@ -157,6 +157,157 @@ class GCloudService:
         tar_stream.seek(0)
         return tar_stream.read()
     
+    
+    async def preflight_checks(self, progress_callback: Optional[Callable] = None) -> Dict:
+        """
+        ✅ PHASE 3: Pre-flight GCP environment checks
+        Verifies all required APIs and resources before deployment
+        """
+        checks = {
+            'project_access': False,
+            'artifact_registry': False,
+            'cloud_build_api': False,
+            'cloud_run_api': False,
+            'storage_bucket': False
+        }
+        errors = []
+        
+        try:
+            if progress_callback:
+                await progress_callback("🔍 Running pre-flight checks...")
+            
+            # Check 1: Project access
+            try:
+                from google.cloud import resourcemanager_v3
+                client = resourcemanager_v3.ProjectsClient()
+                project_name = f"projects/{self.project_id}"
+                project = client.get_project(name=project_name)
+                checks['project_access'] = True
+                if progress_callback:
+                    await progress_callback(f"✅ Project access verified: {self.project_id}")
+            except Exception as e:
+                errors.append(f"Project access failed: {str(e)}")
+                if progress_callback:
+                    await progress_callback(f"❌ Project access check failed")
+            
+            # Check 2: Artifact Registry repository exists (auto-create if missing)
+            try:
+                from google.cloud.devtools import artifactregistry_v1
+                ar_client = artifactregistry_v1.ArtifactRegistryClient()
+                repo_name = f"projects/{self.project_id}/locations/{self.region}/repositories/servergem"
+                
+                try:
+                    repository = ar_client.get_repository(name=repo_name)
+                    checks['artifact_registry'] = True
+                    if progress_callback:
+                        await progress_callback("✅ Artifact Registry found")
+                except google_exceptions.NotFound:
+                    # ✅ PHASE 3: Auto-create Artifact Registry
+                    if progress_callback:
+                        await progress_callback("📦 Creating Artifact Registry...")
+                    
+                    parent = f"projects/{self.project_id}/locations/{self.region}"
+                    repository = artifactregistry_v1.Repository(
+                        format_=artifactregistry_v1.Repository.Format.DOCKER,
+                        description="ServerGem deployments"
+                    )
+                    
+                    operation = ar_client.create_repository(
+                        parent=parent,
+                        repository_id="servergem",
+                        repository=repository
+                    )
+                    
+                    # Wait for creation
+                    await asyncio.to_thread(operation.result, timeout=60)
+                    checks['artifact_registry'] = True
+                    
+                    if progress_callback:
+                        await progress_callback("✅ Artifact Registry created successfully")
+                    
+            except Exception as e:
+                errors.append(f"Artifact Registry check failed: {str(e)}")
+                if progress_callback:
+                    await progress_callback(f"❌ Artifact Registry check failed")
+            
+            # Check 3: Cloud Build API enabled
+            try:
+                # Try to list builds to verify API is enabled
+                parent = f"projects/{self.project_id}/locations/{self.region}"
+                request = cloudbuild_v1.ListBuildsRequest(
+                    parent=parent,
+                    page_size=1
+                )
+                await asyncio.to_thread(self.build_client.list_builds, request=request)
+                checks['cloud_build_api'] = True
+                if progress_callback:
+                    await progress_callback("✅ Cloud Build API enabled")
+            except Exception as e:
+                errors.append(f"Cloud Build API not enabled: {str(e)}")
+                if progress_callback:
+                    await progress_callback("❌ Cloud Build API not enabled")
+            
+            # Check 4: Cloud Run API enabled
+            try:
+                parent = f"projects/{self.project_id}/locations/{self.region}"
+                request = run_v2.ListServicesRequest(parent=parent, page_size=1)
+                await asyncio.to_thread(self.run_client.list_services, request=request)
+                checks['cloud_run_api'] = True
+                if progress_callback:
+                    await progress_callback("✅ Cloud Run API enabled")
+            except Exception as e:
+                errors.append(f"Cloud Run API not enabled: {str(e)}")
+                if progress_callback:
+                    await progress_callback("❌ Cloud Run API not enabled")
+            
+            # Check 5: Storage bucket exists (auto-create if missing)
+            try:
+                from google.cloud import storage
+                storage_client = storage.Client(project=self.project_id)
+                bucket_name = f'{self.project_id}_cloudbuild'
+                
+                try:
+                    bucket = storage_client.get_bucket(bucket_name)
+                    checks['storage_bucket'] = True
+                    if progress_callback:
+                        await progress_callback("✅ Cloud Build bucket found")
+                except Exception:
+                    # Auto-create bucket
+                    if progress_callback:
+                        await progress_callback("📦 Creating Cloud Build bucket...")
+                    
+                    bucket = storage_client.create_bucket(
+                        bucket_name,
+                        location=self.region
+                    )
+                    checks['storage_bucket'] = True
+                    
+                    if progress_callback:
+                        await progress_callback("✅ Cloud Build bucket created")
+                        
+            except Exception as e:
+                errors.append(f"Storage bucket check failed: {str(e)}")
+                if progress_callback:
+                    await progress_callback("❌ Storage bucket check failed")
+            
+            all_passed = all(checks.values())
+            
+            return {
+                'success': all_passed,
+                'checks': checks,
+                'errors': errors,
+                'message': '✅ All pre-flight checks passed' if all_passed else '❌ Some pre-flight checks failed'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Pre-flight checks failed: {e}")
+            return {
+                'success': False,
+                'checks': checks,
+                'errors': errors + [str(e)],
+                'message': 'Pre-flight checks encountered an error'
+            }
+    
     async def build_image(
         self, 
         project_path: str, 
@@ -165,14 +316,16 @@ class GCloudService:
         build_config: Optional[Dict] = None
     ) -> Dict:
         """
-        Build Docker image using Cloud Build API (no CLI required!)
+        ✅ PHASE 3: Build Docker image with retry logic and better error handling
         
         Features:
+        - Pre-flight checks before building
+        - Retry logic for transient failures
         - Multi-stage build support
         - Build cache optimization
         - Parallel layer builds
         - Build time metrics
-        - Failure recovery
+        - Detailed error messages
         
         Args:
             project_path: Local path to project with Dockerfile
@@ -180,6 +333,38 @@ class GCloudService:
             progress_callback: Optional async callback for progress updates
             build_config: Optional build configuration (timeout, machine_type, etc.)
         """
+        
+        # ✅ PHASE 3: Wrap in retry strategy
+        async def _build_with_retry():
+            return await self._build_image_internal(
+                project_path,
+                image_name,
+                progress_callback,
+                build_config
+            )
+        
+        try:
+            return await self.retry_strategy.execute(_build_with_retry)
+        except Exception as e:
+            self.logger.error(f"Build failed after retries: {e}")
+            return {
+                'success': False,
+                'error': f'Build failed after {self.retry_strategy.max_retries} retries: {str(e)}\n\n' + 
+                         'Common issues:\n' +
+                         '• Check Dockerfile syntax\n' +
+                         '• Ensure Cloud Build API is enabled\n' +
+                         '• Verify billing is enabled\n' +
+                         '• Check service account permissions'
+            }
+    
+    async def _build_image_internal(
+        self,
+        project_path: str,
+        image_name: str,
+        progress_callback: Optional[Callable] = None,
+        build_config: Optional[Dict] = None
+    ) -> Dict:
+        """Internal build implementation with detailed error handling"""
         start_time = time.time()
         self.metrics['builds']['total'] += 1
         
