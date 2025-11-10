@@ -397,7 +397,8 @@ All secrets will be stored securely in Google Secret Manager.
                     response = await user_orchestrator.process_message(
                         message,
                         session_id,
-                        progress_notifier=progress_notifier
+                        progress_notifier=progress_notifier,
+                        safe_send=safe_send_json  # Pass safe_send for progress messages during analysis
                     )
                     
                     # Send response

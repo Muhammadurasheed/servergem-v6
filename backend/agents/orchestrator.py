@@ -281,7 +281,8 @@ Be concise, helpful, and NEVER mention gcloud setup or GCP authentication.
         user_message: str, 
         session_id: str, 
         progress_notifier: Optional[ProgressNotifier] = None,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        safe_send: Optional[Callable] = None
     ) -> Dict[str, Any]:
         """
         Main entry point: processes user message with Gemini ADK function calling
@@ -289,8 +290,14 @@ Be concise, helpful, and NEVER mention gcloud setup or GCP authentication.
         Args:
             user_message: User's chat message
             session_id: Session identifier
+            progress_notifier: Optional progress notifier for deployment tracking
             progress_callback: Optional async callback for real-time updates
+            safe_send: Optional callback to send messages to client (for progress during analysis)
         """
+        
+        # Store for use in helper methods
+        self.session_id = session_id
+        self.safe_send = safe_send
         
         # Initialize chat session if needed
         if not self.chat_session:
@@ -333,13 +340,15 @@ Be concise, helpful, and NEVER mention gcloud setup or GCP authentication.
                             # Extract text from final response
                             response_text = self._extract_text_from_response(final_response)
                             
-                            # Return combined result
+                            # Return combined result - pass through ALL fields from function_result
                             return {
                                 'type': function_result.get('type', 'message'),
                                 'content': response_text or function_result.get('content', ''),
                                 'data': function_result.get('data'),
                                 'actions': function_result.get('actions'),
                                 'deployment_url': function_result.get('deployment_url'),
+                                'request_env_vars': function_result.get('request_env_vars', False),  # CRITICAL for env vars UI
+                                'detected_env_vars': function_result.get('detected_env_vars', []),  # Detected env var names
                                 'timestamp': datetime.now().isoformat()
                             }
             
@@ -479,6 +488,7 @@ Be concise, helpful, and NEVER mention gcloud setup or GCP authentication.
                 )
             
             # Create callback for real-time progress during analysis
+            # CRITICAL: Send progress even without progress_notifier using direct WebSocket
             async def analysis_progress(message: str):
                 if progress_notifier:
                     await progress_notifier.send_update(
@@ -486,6 +496,9 @@ Be concise, helpful, and NEVER mention gcloud setup or GCP authentication.
                         "in-progress",
                         message
                     )
+                else:
+                    # During initial analysis (before deployment), send direct messages
+                    await self._send_progress_message(message)
             
             try:
                 analysis_result = await self.analysis_service.analyze_and_generate(
@@ -1208,6 +1221,20 @@ Showing last {min(20, len(logs))} entries (total: {len(logs)})
         self.chat_session = None
         self.conversation_history.clear()
         self.project_context.clear()
+    
+    async def _send_progress_message(self, message: str):
+        """Send a progress message to the client during analysis"""
+        if self.safe_send and self.session_id:
+            try:
+                await self.safe_send(self.session_id, {
+                    'type': 'message',
+                    'data': {
+                        'content': message,
+                        'metadata': {'type': 'progress'}
+                    }
+                })
+            except Exception as e:
+                print(f"[Orchestrator] Error sending progress message: {e}")
 
 
 # ============================================================================

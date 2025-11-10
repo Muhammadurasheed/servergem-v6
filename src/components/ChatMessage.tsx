@@ -2,7 +2,7 @@ import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import remarkGfm from "remark-gfm";
-import { User, Sparkles } from "lucide-react";
+import { User, Sparkles, Loader2 } from "lucide-react";
 import type { ChatMessage } from "@/types/websocket";
 import { EnvVariablesInput, EnvVariable } from "./chat/EnvVariablesInput";
 
@@ -33,6 +33,9 @@ const ChatMessageComponent = ({ message, onEnvSubmit, sendStructuredMessage }: C
     message.content.toLowerCase().includes('perfect') ||
     message.content.toLowerCase().includes('✅ configuration')
   );
+  
+  // Check if this is a progress message (should show with loader)
+  const isProgressMessage = message.metadata?.type === 'progress';
 
   return (
     <div
@@ -53,6 +56,8 @@ const ChatMessageComponent = ({ message, onEnvSubmit, sendStructuredMessage }: C
       >
         {isUser ? (
           <User className="w-4 h-4 text-white" />
+        ) : isProgressMessage ? (
+          <Loader2 className="w-4 h-4 text-white animate-spin" />
         ) : (
           <Sparkles className="w-4 h-4 text-white" />
         )}
@@ -65,7 +70,9 @@ const ChatMessageComponent = ({ message, onEnvSubmit, sendStructuredMessage }: C
             rounded-2xl px-4 py-3
             ${isUser
               ? "bg-gradient-to-br from-[#3b82f6] to-[#8b5cf6] text-white rounded-tr-sm"
-              : "bg-[rgba(30,41,59,0.8)] border border-[rgba(139,92,246,0.3)] text-gray-100 rounded-tl-sm"
+              : isProgressMessage 
+                ? "bg-[rgba(30,41,59,0.6)] border border-[rgba(139,92,246,0.2)] text-gray-300 rounded-tl-sm"
+                : "bg-[rgba(30,41,59,0.8)] border border-[rgba(139,92,246,0.3)] text-gray-100 rounded-tl-sm"
             }
           `}
         >

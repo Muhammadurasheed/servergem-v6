@@ -149,12 +149,19 @@ class GCloudService:
         self.metrics['builds']['total'] += 1
         
         try:
-            # Normalize path for cross-platform compatibility
+            # Normalize path for cross-platform compatibility (Windows backslashes -> forward slashes)
             from pathlib import Path
+            import platform
+            
+            # On Windows, convert backslashes to forward slashes for gcloud commands
+            if platform.system() == 'Windows':
+                project_path = project_path.replace('\\', '/')
+            
             project_path = str(Path(project_path).resolve())
             
             self.logger.info(f"Starting build for: {image_name}")
             self.logger.info(f"Project path (normalized): {project_path}")
+            self.logger.info(f"Platform: {platform.system()}")
             
             # Validate project path
             if not Path(project_path).exists():

@@ -218,10 +218,13 @@ export const useChat = (): UseChatReturn => {
             duration: 5000,
           });
         } else {
+          // Handle progress messages vs regular messages
+          const isProgress = msgData.metadata?.type === 'progress';
+          
           addAssistantMessage({
             content: msgData.content,
             actions: msgData.actions,
-            metadata: msgData.metadata,
+            metadata: isProgress ? { type: 'progress' } : msgData.metadata,
           });
         }
         break;
