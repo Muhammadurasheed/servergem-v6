@@ -295,9 +295,11 @@ Env vars auto-parsed from .env. Never clone twice.
                         import google.generativeai as genai
                         genai.configure(api_key=self.gemini_api_key)
                         
-                        # ✅ Backup with SDK 0.8.5 (stable)
+                        # ✅ CRITICAL: SDK 0.8.5 uses v1beta API
+                        # Available models in v1beta: gemini-pro, gemini-1.5-pro
+                        # gemini-1.5-flash does NOT exist in v1beta!
                         backup_model = genai.GenerativeModel(
-                            'gemini-1.5-flash',  # ✅ No 'models/' prefix needed
+                            'gemini-1.5-pro',  # ✅ Correct model for v1beta API
                             tools=[self._get_function_declarations_genai()],
                             system_instruction=self.model._system_instruction if hasattr(self.model, '_system_instruction') else None
                         )
