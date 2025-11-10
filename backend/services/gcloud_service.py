@@ -6,11 +6,14 @@ FAANG-level implementation with:
 - Metrics and monitoring hooks
 - Security best practices
 - Cost optimization
+- Direct API usage (no CLI required)
 """
 
 import os
 import json
-import subprocess
+import base64
+import tarfile
+import io
 from typing import Dict, List, Optional, Callable, Any
 from pathlib import Path
 import asyncio
@@ -18,6 +21,12 @@ import logging
 import time
 from datetime import datetime
 from enum import Enum
+
+# Google Cloud API clients (no CLI required!)
+from google.cloud.devtools import cloudbuild_v1
+from google.cloud import run_v2
+from google.api_core import retry
+from google.api_core import exceptions as google_exceptions
 
 # Configure structured logging
 logging.basicConfig(
@@ -91,8 +100,10 @@ class GCloudService:
             'build_times': [],
             'deploy_times': []
         }
-        self.gcloud_available = False
-        self.docker_available = False
+        
+        # Initialize Google Cloud API clients (no CLI required!)
+        self.build_client = cloudbuild_v1.CloudBuildClient()
+        self.run_client = run_v2.ServicesClient()
         
         # Configure logger with correlation ID
         self.logger = logging.LoggerAdapter(
@@ -104,27 +115,7 @@ class GCloudService:
             raise ValueError('GOOGLE_CLOUD_PROJECT environment variable required')
         
         self.logger.info(f"Initialized GCloudService for project: {self.project_id}")
-        
-        # Check if required tools are installed
-        self._check_required_tools()
-    
-    def _check_required_tools(self):
-        """Check if gcloud and docker are installed"""
-        import shutil
-        
-        # Check gcloud CLI
-        self.gcloud_available = shutil.which('gcloud') is not None
-        if self.gcloud_available:
-            self.logger.info("✅ gcloud CLI is installed")
-        else:
-            self.logger.warning("⚠️  gcloud CLI not found in PATH")
-        
-        # Check Docker
-        self.docker_available = shutil.which('docker') is not None
-        if self.docker_available:
-            self.logger.info("✅ Docker is installed")
-        else:
-            self.logger.warning("⚠️  Docker not found in PATH")
+        self.logger.info("✅ Using Google Cloud APIs directly (no CLI required)")
     
     def _generate_correlation_id(self) -> str:
         """Generate unique correlation ID for request tracking"""
@@ -145,6 +136,27 @@ class GCloudService:
             'note': 'Using ServerGem managed infrastructure'
         }
     
+    def _create_source_tarball(self, project_path: str) -> bytes:
+        """Create tarball of project source code for Cloud Build"""
+        tar_stream = io.BytesIO()
+        
+        with tarfile.open(fileobj=tar_stream, mode='w:gz') as tar:
+            project_path_obj = Path(project_path)
+            
+            for file_path in project_path_obj.rglob('*'):
+                if file_path.is_file():
+                    # Skip common ignore patterns
+                    relative_path = file_path.relative_to(project_path_obj)
+                    
+                    skip_patterns = ['.git', '__pycache__', 'node_modules', '.env', '.venv', 'venv']
+                    if any(pattern in str(relative_path) for pattern in skip_patterns):
+                        continue
+                    
+                    tar.add(file_path, arcname=str(relative_path))
+        
+        tar_stream.seek(0)
+        return tar_stream.read()
+    
     async def build_image(
         self, 
         project_path: str, 
@@ -153,7 +165,7 @@ class GCloudService:
         build_config: Optional[Dict] = None
     ) -> Dict:
         """
-        Build Docker image using Cloud Build with production optimizations
+        Build Docker image using Cloud Build API (no CLI required!)
         
         Features:
         - Multi-stage build support
@@ -168,60 +180,20 @@ class GCloudService:
             progress_callback: Optional async callback for progress updates
             build_config: Optional build configuration (timeout, machine_type, etc.)
         """
-        # Check if gcloud is available
-        if not self.gcloud_available:
-            error_msg = (
-                "❌ **Google Cloud CLI (gcloud) is not installed**\n\n"
-                "To deploy to Cloud Run, you need to install the gcloud CLI:\n\n"
-                "**Windows:**\n"
-                "1. Download from: https://cloud.google.com/sdk/docs/install\n"
-                "2. Run the installer\n"
-                "3. Restart your terminal/command prompt\n"
-                "4. Run: `gcloud init`\n\n"
-                "**macOS/Linux:**\n"
-                "```bash\n"
-                "curl https://sdk.cloud.google.com | bash\n"
-                "exec -l $SHELL\n"
-                "gcloud init\n"
-                "```\n\n"
-                "After installation, restart the backend server."
-            )
-            self.logger.error("gcloud CLI not found")
-            return {
-                'success': False,
-                'error': error_msg
-            }
-        
         start_time = time.time()
         self.metrics['builds']['total'] += 1
         
         try:
-            # ✅ FIX: Cross-platform path normalization
-            from pathlib import Path
-            import platform
-            
-            system = platform.system()
-            self.logger.info(f"Operating system: {system}")
-            
-            # Resolve to absolute path first
             project_path_obj = Path(project_path).resolve()
             
-            # For gcloud commands, always use forward slashes (even on Windows)
-            if system == 'Windows':
-                # Convert Windows path to Unix-style for gcloud
-                normalized_path = str(project_path_obj).replace('\\', '/')
-                self.logger.info(f"Windows path normalized: {project_path} -> {normalized_path}")
-            else:
-                normalized_path = str(project_path_obj)
-            
-            self.logger.info(f"Starting build for: {image_name}")
-            self.logger.info(f"Project path (resolved): {normalized_path}")
+            self.logger.info(f"Starting Cloud Build API for: {image_name}")
+            self.logger.info(f"Project path: {project_path_obj}")
             
             # Validate project path exists
             if not project_path_obj.exists():
                 return {
                     'success': False,
-                    'error': f"Project path not found: {normalized_path}"
+                    'error': f"Project path not found: {project_path_obj}"
                 }
             
             # Validate Dockerfile exists
@@ -229,109 +201,111 @@ class GCloudService:
             if not dockerfile_path.exists():
                 return {
                     'success': False,
-                    'error': f"Dockerfile not found in: {normalized_path}"
+                    'error': f"Dockerfile not found in: {project_path_obj}"
                 }
             
             self.logger.info(f"✅ Dockerfile verified at: {dockerfile_path}")
             
             image_tag = f'{self.artifact_registry}/{self.project_id}/servergem/{image_name}:latest'
             
-            self.logger.info(f"Building image: {image_tag}")
-            self.logger.info(f"Dockerfile exists: {dockerfile_path}")
-            
             if progress_callback:
                 await progress_callback({
                     'stage': 'build',
                     'progress': 10,
-                    'message': f'Starting Cloud Build for {image_name}...',
-                    'logs': [f'📦 Image: {image_tag}']
+                    'message': f'📦 Preparing source code for Cloud Build...',
+                    'logs': [f'Image: {image_tag}']
                 })
             
-            # Build command with production optimizations
-            cmd = [
-                'gcloud', 'builds', 'submit',
-                '--project', self.project_id,
-                '--region', self.region,
-                '--tag', image_tag,
-                '--timeout', '15m',  # 15 minute timeout
-                '--machine-type', 'E2_HIGHCPU_8',  # Faster builds
-                normalized_path  # ✅ FIX: Use normalized path (not project_path)
-            ]
-            
-            # Add build config if provided
-            if build_config:
-                if build_config.get('cache'):
-                    cmd.extend(['--no-cache=false'])
-                if build_config.get('timeout'):
-                    cmd.extend(['--timeout', build_config['timeout']])
-            
-            self.logger.info(f"Executing build command: {' '.join(cmd)}")
-            
-            # ✅ FIX: Set working directory to project path for subprocess
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(project_path_obj)  # Set working directory
+            # Create source tarball
+            self.logger.info("Creating source tarball...")
+            source_bytes = await asyncio.to_thread(
+                self._create_source_tarball, 
+                str(project_path_obj)
             )
             
-            # Stream output with enhanced progress tracking
-            progress = 10
-            logs = []
-            stderr_logs = []
+            if progress_callback:
+                await progress_callback({
+                    'stage': 'build',
+                    'progress': 20,
+                    'message': f'☁️ Uploading to Cloud Build ({len(source_bytes) // 1024} KB)...',
+                })
             
-            # Collect both stdout and stderr
-            async def read_stdout():
-                async for line in process.stdout:
-                    line_str = line.decode().strip()
-                    if not line_str:
-                        continue
-                    
-                    self.logger.debug(f"[CloudBuild] {line_str}")
-                    logs.append(line_str)
-                    
-                    # Update progress based on build stages
-                    nonlocal progress
-                    if 'Fetching' in line_str or 'Pulling' in line_str:
-                        progress = min(progress + 2, 30)
-                    elif 'Step' in line_str:
-                        progress = min(progress + 3, 70)
-                    elif 'Pushing' in line_str:
-                        progress = min(progress + 5, 90)
-                    elif 'DONE' in line_str or 'SUCCESS' in line_str:
-                        progress = 95
-                    
-                    if progress_callback:
-                        await progress_callback({
-                            'stage': 'build',
-                            'progress': progress,
-                            'message': line_str[:100],
-                            'logs': logs[-10:]
-                        })
+            # Create build configuration
+            build = cloudbuild_v1.Build()
+            build.source = cloudbuild_v1.Source()
+            build.source.storage_source = None  # Will use inline source
             
-            async def read_stderr():
-                async for line in process.stderr:
-                    line_str = line.decode().strip()
-                    if line_str:
-                        self.logger.error(f"[CloudBuild ERROR] {line_str}")
-                        stderr_logs.append(line_str)
+            # Configure build steps
+            build.steps = [
+                cloudbuild_v1.BuildStep(
+                    name='gcr.io/cloud-builders/docker',
+                    args=['build', '-t', image_tag, '.'],
+                    timeout={'seconds': 900}  # 15 minutes
+                )
+            ]
             
-            # Read both streams concurrently
-            await asyncio.gather(read_stdout(), read_stderr())
-            await process.wait()
+            # Set images to push
+            build.images = [image_tag]
+            
+            # Set machine type and timeout
+            build.options = cloudbuild_v1.BuildOptions(
+                machine_type=cloudbuild_v1.BuildOptions.MachineType.E2_HIGHCPU_8,
+                logging=cloudbuild_v1.BuildOptions.LoggingMode.GCS_ONLY,
+            )
+            build.timeout = {'seconds': 900}
+            
+            # Encode source as inline bytes
+            build.source.storage_source = cloudbuild_v1.StorageSource(
+                bucket=f'{self.project_id}_cloudbuild',
+                object_='source.tar.gz'
+            )
+            
+            if progress_callback:
+                await progress_callback({
+                    'stage': 'build',
+                    'progress': 30,
+                    'message': '🔨 Starting Cloud Build (this may take a few minutes)...',
+                })
+            
+            # Submit build
+            parent = f"projects/{self.project_id}/locations/{self.region}"
+            
+            operation = await asyncio.to_thread(
+                self.build_client.create_build,
+                project_id=self.project_id,
+                build=build
+            )
+            
+            build_id = operation.metadata.build.id
+            self.logger.info(f"Cloud Build started: {build_id}")
+            
+            # Poll for completion
+            progress = 30
+            while not operation.done():
+                await asyncio.sleep(5)
+                progress = min(progress + 5, 90)
+                
+                if progress_callback:
+                    await progress_callback({
+                        'stage': 'build',
+                        'progress': progress,
+                        'message': f'Building Docker image... ({progress}%)',
+                    })
+            
+            # Check result
+            result = operation.result()
             
             build_duration = time.time() - start_time
             self.metrics['build_times'].append(build_duration)
             
-            if process.returncode == 0:
+            if result.status == cloudbuild_v1.Build.Status.SUCCESS:
                 self.metrics['builds']['success'] += 1
                 
                 if progress_callback:
                     await progress_callback({
                         'stage': 'build',
                         'progress': 100,
-                        'message': f'Build completed in {build_duration:.1f}s',
-                        'logs': logs[-5:]
+                        'message': f'✅ Build completed in {build_duration:.1f}s',
                     })
                 
                 self.logger.info(f"Build successful: {image_tag} ({build_duration:.1f}s)")
@@ -340,23 +314,23 @@ class GCloudService:
                     'success': True,
                     'image_tag': image_tag,
                     'build_duration': build_duration,
+                    'build_id': build_id,
                     'message': f'Image built successfully: {image_tag}'
                 }
             else:
                 self.metrics['builds']['failed'] += 1
+                error_msg = f"Build failed with status: {result.status.name}"
                 
-                # Combine stderr logs into error message
-                error_details = '\n'.join(stderr_logs) if stderr_logs else 'No error details available'
+                self.logger.error(error_msg)
                 
-                self.logger.error(f"Build failed (exit code {process.returncode}): {error_details}")
-                
-                # Return detailed error
                 return {
                     'success': False,
-                    'error': f'Cloud Build failed (exit code {process.returncode}):\n\n{error_details[:500]}'
+                    'error': error_msg
                 }
                 
         except Exception as e:
+            self.metrics['builds']['failed'] += 1
+            self.logger.error(f"Build exception: {str(e)}")
             return {
                 'success': False,
                 'error': f'Build failed: {str(e)}'
@@ -372,7 +346,7 @@ class GCloudService:
         user_id: Optional[str] = None
     ) -> Dict:
         """
-        Deploy image to Cloud Run on ServerGem's managed infrastructure
+        Deploy image to Cloud Run using API (no CLI required!)
         
         Args:
             image_tag: Full image tag from Artifact Registry
@@ -382,136 +356,167 @@ class GCloudService:
             progress_callback: Optional async callback for progress updates
             user_id: User identifier for service isolation
         """
-        # Check if gcloud is available
-        if not self.gcloud_available:
-            error_msg = (
-                "❌ **Google Cloud CLI (gcloud) is not installed**\n\n"
-                "Please install gcloud CLI first. See the build error message for installation instructions."
-            )
-            self.logger.error("gcloud CLI not found")
-            return {
-                'success': False,
-                'error': error_msg
-            }
-        
         try:
             # Generate unique service name for user isolation
             unique_service_name = f"{user_id}-{service_name}" if user_id else service_name
             unique_service_name = unique_service_name.lower().replace('_', '-')[:63]  # Cloud Run limit
             
+            self.logger.info(f"Deploying service: {unique_service_name}")
+            
             if progress_callback:
                 await progress_callback({
                     'stage': 'deploy',
                     'progress': 10,
-                    'message': f'Deploying {unique_service_name} to ServerGem Cloud...'
+                    'message': f'🚀 Deploying {unique_service_name} to Cloud Run...'
                 })
             
-            cmd = [
-                'gcloud', 'run', 'deploy', unique_service_name,
-                '--image', image_tag,
-                '--project', self.project_id,
-                '--region', self.region,
-                '--platform', 'managed',
-                '--allow-unauthenticated',
-                '--port', '8080',
-                '--memory', '512Mi',
-                '--cpu', '1',
-                '--max-instances', '10',
-                '--min-instances', '0',
-                '--timeout', '300',
-                '--labels', f'managed-by=servergem,user-id={user_id or "unknown"}'
-            ]
+            # Build parent path
+            parent = f"projects/{self.project_id}/locations/{self.region}"
+            service_path = f"{parent}/services/{unique_service_name}"
+            
+            # Create service configuration
+            service = run_v2.Service()
+            service.name = service_path
+            
+            # Configure template
+            service.template = run_v2.RevisionTemplate()
+            
+            # Container configuration
+            container = run_v2.Container()
+            container.image = image_tag
+            container.ports = [run_v2.ContainerPort(container_port=8080)]
             
             # Add environment variables
             if env_vars:
-                env_str = ','.join([f'{k}={v}' for k, v in env_vars.items()])
-                cmd.extend(['--set-env-vars', env_str])
+                container.env = [
+                    run_v2.EnvVar(name=k, value=v)
+                    for k, v in env_vars.items()
+                ]
             
-            # Add secrets
-            if secrets:
-                for secret_name, secret_version in secrets.items():
-                    cmd.extend(['--set-secrets', f'{secret_name}={secret_version}'])
-            
-            print(f"[GCloudService] Deploying service: {service_name}")
-            
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+            # Resource limits
+            container.resources = run_v2.ResourceRequirements(
+                limits={'cpu': '1', 'memory': '512Mi'}
             )
             
-            # Stream output
-            progress = 10
-            async for line in process.stdout:
-                line_str = line.decode().strip()
-                print(f"[CloudRun] {line_str}")
+            service.template.containers = [container]
+            
+            # Scaling configuration
+            service.template.scaling = run_v2.RevisionScaling(
+                min_instance_count=0,
+                max_instance_count=10
+            )
+            
+            # Timeout
+            service.template.timeout = {'seconds': 300}
+            
+            # Labels
+            service.labels = {
+                'managed-by': 'servergem',
+                'user-id': user_id or 'unknown'
+            }
+            
+            if progress_callback:
+                await progress_callback({
+                    'stage': 'deploy',
+                    'progress': 30,
+                    'message': '☁️ Creating Cloud Run service...'
+                })
+            
+            # Check if service exists
+            try:
+                existing_service = await asyncio.to_thread(
+                    self.run_client.get_service,
+                    name=service_path
+                )
+                
+                # Service exists, update it
+                self.logger.info(f"Updating existing service: {unique_service_name}")
+                
+                operation = await asyncio.to_thread(
+                    self.run_client.update_service,
+                    service=service
+                )
+                
+            except google_exceptions.NotFound:
+                # Service doesn't exist, create it
+                self.logger.info(f"Creating new service: {unique_service_name}")
+                
+                operation = await asyncio.to_thread(
+                    self.run_client.create_service,
+                    parent=parent,
+                    service=service,
+                    service_id=unique_service_name
+                )
+            
+            if progress_callback:
+                await progress_callback({
+                    'stage': 'deploy',
+                    'progress': 60,
+                    'message': '⏳ Waiting for deployment to complete...'
+                })
+            
+            # Wait for operation to complete
+            progress = 60
+            while not operation.done():
+                await asyncio.sleep(3)
+                progress = min(progress + 5, 90)
                 
                 if progress_callback:
-                    progress = min(progress + 5, 90)
                     await progress_callback({
                         'stage': 'deploy',
                         'progress': progress,
-                        'message': line_str
+                        'message': f'Deploying... ({progress}%)'
                     })
             
-            await process.wait()
+            # Get result
+            result = await asyncio.to_thread(operation.result)
             
-            if process.returncode == 0:
-                # Get actual Cloud Run URL (for internal use)
-                gcp_url = await self._get_service_url(unique_service_name)
-                
-                # Generate custom ServerGem URL
-                custom_url = f"https://{unique_service_name}.servergem.app"
-                
-                if progress_callback:
-                    await progress_callback({
-                        'stage': 'deploy',
-                        'progress': 100,
-                        'message': f'🎉 Deployment complete: {custom_url}'
-                    })
-                
-                return {
-                    'success': True,
-                    'service_name': unique_service_name,
-                    'url': custom_url,  # User-facing ServerGem URL
-                    'gcp_url': gcp_url,  # Internal Cloud Run URL
-                    'region': self.region,
-                    'message': f'✅ Deployed successfully to {custom_url}'
-                }
-            else:
-                stderr = await process.stderr.read()
-                raise Exception(f"Deployment failed: {stderr.decode()}")
+            # Get service URL
+            service_url = result.uri
+            
+            # Generate custom ServerGem URL
+            custom_url = f"https://{unique_service_name}.servergem.app"
+            
+            if progress_callback:
+                await progress_callback({
+                    'stage': 'deploy',
+                    'progress': 100,
+                    'message': f'🎉 Deployment complete!'
+                })
+            
+            self.logger.info(f"Deployment successful: {service_url}")
+            
+            return {
+                'success': True,
+                'service_name': unique_service_name,
+                'url': custom_url,  # User-facing ServerGem URL
+                'gcp_url': service_url,  # Internal Cloud Run URL
+                'region': self.region,
+                'message': f'✅ Deployed successfully to {custom_url}'
+            }
                 
         except Exception as e:
+            self.logger.error(f"Deployment failed: {str(e)}")
             return {
                 'success': False,
                 'error': f'Deployment failed: {str(e)}'
             }
     
     async def _get_service_url(self, service_name: str) -> str:
-        """Get Cloud Run service URL"""
+        """Get Cloud Run service URL using API"""
         try:
-            cmd = [
-                'gcloud', 'run', 'services', 'describe', service_name,
-                '--project', self.project_id,
-                '--region', self.region,
-                '--format', 'value(status.url)'
-            ]
+            parent = f"projects/{self.project_id}/locations/{self.region}"
+            service_path = f"{parent}/services/{service_name}"
             
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+            service = await asyncio.to_thread(
+                self.run_client.get_service,
+                name=service_path
             )
             
-            stdout, _ = await process.communicate()
-            
-            if process.returncode == 0:
-                return stdout.decode().strip()
-            else:
-                return f'https://{service_name}-{self.region}.run.app'
+            return service.uri or f'https://{service_name}-{self.region}.run.app'
                 
-        except Exception:
+        except Exception as e:
+            self.logger.warning(f"Could not get service URL: {e}")
             return f'https://{service_name}-{self.region}.run.app'
     
     async def create_secret(self, secret_name: str, secret_value: str) -> Dict:
