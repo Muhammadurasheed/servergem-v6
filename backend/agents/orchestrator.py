@@ -276,6 +276,32 @@ Be concise, helpful, and NEVER mention gcloud setup or GCP authentication.
             ]
         )
     
+    async def _retry_with_backoff(self, func, max_retries: int = 3, base_delay: float = 1.0):
+        """
+        Retry a function with exponential backoff for network errors
+        """
+        for attempt in range(max_retries):
+            try:
+                return func()
+            except Exception as e:
+                error_str = str(e).lower()
+                # Check if it's a network/connectivity error
+                is_network_error = any(keyword in error_str for keyword in [
+                    'connection aborted', 'connection refused', 'timeout', 
+                    'unavailable', 'iocp', 'socket', '503', '502', '504'
+                ])
+                
+                if not is_network_error or attempt == max_retries - 1:
+                    raise  # Not a network error or final attempt - propagate
+                
+                delay = base_delay * (2 ** attempt)  # Exponential backoff
+                print(f"[Orchestrator] Network error (attempt {attempt + 1}/{max_retries}): {str(e)[:100]}")
+                print(f"[Orchestrator] Retrying in {delay}s...")
+                await self._send_progress_message(f"🔄 Network issue detected, retrying... (attempt {attempt + 1}/{max_retries})")
+                await asyncio.sleep(delay)
+        
+        raise Exception("Max retries exceeded for network operation")
+
     async def process_message(
         self, 
         user_message: str, 
@@ -307,8 +333,12 @@ Be concise, helpful, and NEVER mention gcloud setup or GCP authentication.
         )
         
         try:
-            # Send to Gemini with function calling enabled
-            response = self.chat_session.send_message(enhanced_message)
+            # Send to Gemini with function calling enabled - with retry logic
+            response = await self._retry_with_backoff(
+                lambda: self.chat_session.send_message(enhanced_message),
+                max_retries=3,
+                base_delay=2.0
+            )
         
             # Check if Gemini wants to call a function
             if hasattr(response, 'candidates') and response.candidates:
@@ -323,12 +353,16 @@ Be concise, helpful, and NEVER mention gcloud setup or GCP authentication.
                                 progress_callback=progress_callback
                             )
                             
-                            # Send function result back to Gemini
-                            final_response = self.chat_session.send_message(
-                                Part.from_function_response(
-                                    name=part.function_call.name,
-                                    response=function_result
-                                )
+                            # Send function result back to Gemini - with retry logic
+                            final_response = await self._retry_with_backoff(
+                                lambda: self.chat_session.send_message(
+                                    Part.from_function_response(
+                                        name=part.function_call.name,
+                                        response=function_result
+                                    )
+                                ),
+                                max_retries=3,
+                                base_delay=2.0
                             )
                             
                             # Extract text from final response
@@ -356,12 +390,27 @@ Be concise, helpful, and NEVER mention gcloud setup or GCP authentication.
             }
             
         except Exception as e:
-            print(f"[Orchestrator] Error: {str(e)}")
+            error_msg = str(e)
+            print(f"[Orchestrator] Error: {error_msg}")
             import traceback
             traceback.print_exc()
+            
+            # User-friendly error message for network issues
+            if any(keyword in error_msg.lower() for keyword in ['connection', 'network', 'unavailable', 'timeout', 'iocp', 'socket']):
+                user_message = (
+                    "❌ **Network Connection Issue**\n\n"
+                    "There was a problem connecting to the AI service. This can happen due to:\n"
+                    "• Temporary network issues\n"
+                    "• Firewall or antivirus blocking connections\n"
+                    "• Service availability issues\n\n"
+                    "**Please try again in a few moments.** If the issue persists, check your network connection."
+                )
+            else:
+                user_message = f'❌ Error processing message: {error_msg}'
+            
             return {
                 'type': 'error',
-                'content': f'❌ Error processing message: {str(e)}',
+                'content': user_message,
                 'timestamp': datetime.now().isoformat()
             }
 
