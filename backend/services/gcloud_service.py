@@ -149,33 +149,43 @@ class GCloudService:
         self.metrics['builds']['total'] += 1
         
         try:
-            # Normalize path for cross-platform compatibility (Windows backslashes -> forward slashes)
+            # ✅ FIX: Cross-platform path normalization
             from pathlib import Path
             import platform
             
-            # On Windows, convert backslashes to forward slashes for gcloud commands
-            if platform.system() == 'Windows':
-                project_path = project_path.replace('\\', '/')
+            system = platform.system()
+            self.logger.info(f"Operating system: {system}")
             
-            project_path = str(Path(project_path).resolve())
+            # Resolve to absolute path first
+            project_path_obj = Path(project_path).resolve()
+            
+            # For gcloud commands, always use forward slashes (even on Windows)
+            if system == 'Windows':
+                # Convert Windows path to Unix-style for gcloud
+                normalized_path = str(project_path_obj).replace('\\', '/')
+                self.logger.info(f"Windows path normalized: {project_path} -> {normalized_path}")
+            else:
+                normalized_path = str(project_path_obj)
             
             self.logger.info(f"Starting build for: {image_name}")
-            self.logger.info(f"Project path (normalized): {project_path}")
-            self.logger.info(f"Platform: {platform.system()}")
+            self.logger.info(f"Project path (resolved): {normalized_path}")
             
-            # Validate project path
-            if not Path(project_path).exists():
+            # Validate project path exists
+            if not project_path_obj.exists():
                 return {
                     'success': False,
-                    'error': f"Project path not found: {project_path}"
+                    'error': f"Project path not found: {normalized_path}"
                 }
             
-            dockerfile_path = Path(project_path) / 'Dockerfile'
+            # Validate Dockerfile exists
+            dockerfile_path = project_path_obj / 'Dockerfile'
             if not dockerfile_path.exists():
                 return {
                     'success': False,
-                    'error': f"Dockerfile not found in: {project_path}"
+                    'error': f"Dockerfile not found in: {normalized_path}"
                 }
+            
+            self.logger.info(f"✅ Dockerfile verified at: {dockerfile_path}")
             
             image_tag = f'{self.artifact_registry}/{self.project_id}/servergem/{image_name}:latest'
             
@@ -198,7 +208,7 @@ class GCloudService:
                 '--tag', image_tag,
                 '--timeout', '15m',  # 15 minute timeout
                 '--machine-type', 'E2_HIGHCPU_8',  # Faster builds
-                project_path
+                normalized_path  # ✅ FIX: Use normalized path (not project_path)
             ]
             
             # Add build config if provided
@@ -210,10 +220,12 @@ class GCloudService:
             
             self.logger.info(f"Executing build command: {' '.join(cmd)}")
             
+            # ✅ FIX: Set working directory to project path for subprocess
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(project_path_obj)  # Set working directory
             )
             
             # Stream output with enhanced progress tracking

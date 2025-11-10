@@ -599,26 +599,27 @@ async def _handle_clone_and_analyze(
         }
 
 
-async def _send_progress_message(self, message: str):
-    """
-    ✅ FIX 6: Robust helper to send progress messages
-    """
-    if not self.safe_send or not self.session_id:
-        print(f"[Orchestrator] ⚠️ Cannot send progress: safe_send={bool(self.safe_send)}, session_id={bool(self.session_id)}")
-        return
-    
-    try:
-        await self.safe_send(self.session_id, {
-            'type': 'message',
-            'data': {
-                'content': message,
-                'metadata': {'type': 'progress'}
-            },
-            'timestamp': datetime.now().isoformat()
-        })
-        print(f"[Orchestrator] ✅ Sent progress: {message[:50]}...")
-    except Exception as e:
-        print(f"[Orchestrator] ❌ Error sending progress: {e}")
+    async def _send_progress_message(self, message: str):
+        """
+        ✅ FIX: Robust helper to send progress messages during analysis
+        CRITICAL: This method must be called AFTER safe_send is stored in process_message
+        """
+        if not self.safe_send or not self.session_id:
+            print(f"[Orchestrator] ⚠️ Cannot send progress: safe_send={bool(self.safe_send)}, session_id={bool(self.session_id)}")
+            return
+        
+        try:
+            await self.safe_send(self.session_id, {
+                'type': 'message',
+                'data': {
+                    'content': message,
+                    'metadata': {'type': 'progress'}
+                },
+                'timestamp': datetime.now().isoformat()
+            })
+            print(f"[Orchestrator] ✅ Sent progress: {message[:50]}...")
+        except Exception as e:
+            print(f"[Orchestrator] ❌ Error sending progress: {e}")
     
     def _extract_text_from_response(self, response) -> str:
         """Extract text content from Gemini response"""
@@ -1471,19 +1472,6 @@ Showing last {min(20, len(logs))} entries (total: {len(logs)})
         self.conversation_history.clear()
         self.project_context.clear()
     
-    async def _send_progress_message(self, message: str):
-        """Send a progress message to the client during analysis"""
-        if self.safe_send and self.session_id:
-            try:
-                await self.safe_send(self.session_id, {
-                    'type': 'message',
-                    'data': {
-                        'content': message,
-                        'metadata': {'type': 'progress'}
-                    }
-                })
-            except Exception as e:
-                print(f"[Orchestrator] Error sending progress message: {e}")
 
 
 # ============================================================================

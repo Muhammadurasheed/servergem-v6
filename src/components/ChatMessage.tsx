@@ -19,13 +19,10 @@ const ChatMessageComponent = ({ message, onEnvSubmit, sendStructuredMessage }: C
     minute: "2-digit",
   });
 
-  // Check if message is requesting environment variables
-  // BUT NOT if it's a confirmation message (already received env vars)
+  // ✅ FIX: Check for env vars request with explicit metadata flag
   const requestsEnvVars = !isUser && (
     message.metadata?.type === 'analysis_with_env_request' ||
-    (message.content.toLowerCase().includes('environment variable') ||
-    message.content.toLowerCase().includes('.env file') ||
-    message.content.toLowerCase().includes('provide the environment'))
+    message.metadata?.request_env_vars === true
   ) && !(
     // Don't show upload UI if message is confirming receipt of env vars
     message.content.toLowerCase().includes('received your environment') ||
@@ -33,6 +30,8 @@ const ChatMessageComponent = ({ message, onEnvSubmit, sendStructuredMessage }: C
     message.content.toLowerCase().includes('perfect') ||
     message.content.toLowerCase().includes('✅ configuration')
   );
+  
+  console.log('[ChatMessage] requestsEnvVars:', requestsEnvVars, 'metadata:', message.metadata);
   
   // Check if this is a progress message (should show with loader)
   const isProgressMessage = message.metadata?.type === 'progress';

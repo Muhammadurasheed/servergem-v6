@@ -200,26 +200,31 @@ export const useChat = (): UseChatReturn => {
         
         const msgData = serverMessage.data as any;
         
-        // Check if this is an analysis response requesting env vars
-        if (msgData?.request_env_vars) {
-          console.log('[useChat] Analysis complete, requesting env vars...');
+        // ✅ FIX: Check for env vars at BOTH data level AND top level of serverMessage
+        const needsEnvVars = msgData?.request_env_vars || (serverMessage as any).request_env_vars;
+        const detectedEnvVars = msgData?.detected_env_vars || (serverMessage as any).detected_env_vars || [];
+        
+        if (needsEnvVars) {
+          console.log('[useChat] ✅ Analysis complete, REQUESTING ENV VARS!');
+          console.log('[useChat] Detected env vars:', detectedEnvVars);
           
           addAssistantMessage({
             content: msgData.content,
             metadata: { 
               type: 'analysis_with_env_request',
-              detected_env_vars: msgData.detected_env_vars || []
+              request_env_vars: true,
+              detected_env_vars: detectedEnvVars
             }
           });
           
-          // Trigger env vars UI by sending a special metadata flag
+          // Trigger env vars UI
           sonnerToast.info('Environment Variables Required', {
-            description: 'Please provide your environment variables to continue.',
+            description: `Please provide ${detectedEnvVars.length} environment variable(s) to continue.`,
             duration: 5000,
           });
         } else {
           // Handle progress messages vs regular messages
-          const isProgress = msgData.metadata?.type === 'progress';
+          const isProgress = msgData?.metadata?.type === 'progress';
           
           addAssistantMessage({
             content: msgData.content,
