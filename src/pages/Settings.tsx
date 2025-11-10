@@ -21,12 +21,15 @@ import {
   Trash2,
   LogOut,
   CheckCircle2,
-  XCircle
+  XCircle,
+  ArrowLeft
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 const Settings = () => {
   const { user, signOut } = useAuth();
   const { isConnected: isGitHubConnected, user: githubUser, disconnect: disconnectGitHub } = useGitHub();
+  const navigate = useNavigate();
 
   const handleSaveProfile = () => {
     toast.success('Profile updated successfully!');
@@ -41,7 +44,18 @@ const Settings = () => {
   return (
     <DashboardLayout>
       <div className="container mx-auto px-4 py-8 max-w-4xl">
-        <h1 className="text-3xl font-bold mb-8">Settings</h1>
+        <div className="flex items-center gap-4 mb-8">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate(-1)}
+            className="gap-2"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back
+          </Button>
+          <h1 className="text-3xl font-bold">Settings</h1>
+        </div>
 
         {/* Profile Settings */}
         <Card className="mb-6">

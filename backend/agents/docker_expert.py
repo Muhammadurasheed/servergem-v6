@@ -35,7 +35,9 @@ RUN useradd -m -u 1001 appuser
 COPY --from=builder /root/.local /home/appuser/.local
 COPY --chown=appuser:appuser . .
 USER appuser
-ENV PATH=/home/appuser/.local/bin:$PATH PORT=8080
+ENV PATH=/home/appuser/.local/bin:$PATH
+ENV PORT=8080
+ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 {entry_point}:app
 """,
@@ -52,7 +54,9 @@ RUN useradd -m -u 1001 appuser
 COPY --from=builder /root/.local /home/appuser/.local
 COPY --chown=appuser:appuser . .
 USER appuser
-ENV PATH=/home/appuser/.local/bin:$PATH PORT=8080
+ENV PATH=/home/appuser/.local/bin:$PATH
+ENV PORT=8080
+ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 CMD ["uvicorn", "{entry_point}:app", "--host", "0.0.0.0", "--port", "8080"]
 """,
@@ -69,7 +73,8 @@ WORKDIR /app
 RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
 COPY --from=builder --chown=nodejs:nodejs /app /app
 USER nodejs
-ENV PORT=8080 NODE_ENV=production
+ENV PORT=8080
+ENV NODE_ENV=production
 EXPOSE 8080
 CMD ["node", "{entry_point}"]
 """,
@@ -88,7 +93,8 @@ RUN npm run build
 
 FROM node:18-alpine AS runner
 WORKDIR /app
-ENV NODE_ENV production PORT=8080
+ENV NODE_ENV=production
+ENV PORT=8080
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
