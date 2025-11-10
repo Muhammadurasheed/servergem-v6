@@ -192,7 +192,8 @@ class GCloudService:
             
             # Check 2: Artifact Registry repository exists (auto-create if missing)
             try:
-                from google.cloud.devtools import artifactregistry_v1
+                # ✅ CRITICAL: Correct import path for Artifact Registry
+                from google.cloud import artifactregistry_v1
                 ar_client = artifactregistry_v1.ArtifactRegistryClient()
                 repo_name = f"projects/{self.project_id}/locations/{self.region}/repositories/servergem"
                 
