@@ -83,10 +83,10 @@ Env vars auto-parsed from .env. Never clone twice.
                 system_instruction=system_instruction
             )
         else:
-            # Gemini API with v1 API (upgraded SDK)
+            # ✅ PHASE 1 FIX: Gemini API with v1 (SDK 0.10.1+)
             import google.generativeai as genai
             self.model = genai.GenerativeModel(
-                'gemini-1.5-flash',  # ✅ UPGRADED: v1 API supports 1.5-flash
+                'models/gemini-1.5-flash',  # ✅ Full v1 model path
                 tools=[self._get_function_declarations_genai()],
                 system_instruction=system_instruction
             )
@@ -281,9 +281,9 @@ Env vars auto-parsed from .env. Never clone twice.
                     import google.generativeai as genai
                     genai.configure(api_key=self.gemini_api_key)
                     
-                    # Create backup Gemini API model - v1 API with upgraded SDK
+                    # ✅ PHASE 1 FIX: Backup with full v1 model path
                     backup_model = genai.GenerativeModel(
-                        'gemini-1.5-flash',  # ✅ UPGRADED: v1 API supports 1.5-flash
+                        'models/gemini-1.5-flash',  # ✅ Full v1 model path
                         tools=[self._get_function_declarations_genai()],
                         system_instruction=self.model._system_instruction if hasattr(self.model, '_system_instruction') else None
                     )
