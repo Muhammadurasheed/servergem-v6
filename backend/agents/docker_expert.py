@@ -122,10 +122,12 @@ CMD ["./main"]
 """
         }
     
-    async def generate_dockerfile(self, analysis: Dict, progress_notifier=None) -> Dict:
+    async def generate_dockerfile(self, analysis: Dict, progress_notifier=None, progress_callback=None) -> Dict:
         """Generate optimized Dockerfile based on analysis with real-time progress"""
         
         # ✅ PHASE 1.1: Send progress - Starting Dockerfile generation
+        if progress_callback:
+            await progress_callback(f"🐳 Generating Dockerfile for {analysis.get('framework', 'unknown')}...")
         if progress_notifier:
             await progress_notifier.start_stage(
                 "dockerfile_generation",
@@ -136,6 +138,8 @@ CMD ["./main"]
         
         if framework_key in self.templates:
             # ✅ PHASE 1.1: Progress - Using template
+            if progress_callback:
+                await progress_callback(f"📋 Optimizing for {framework_key}")
             if progress_notifier:
                 await progress_notifier.update_progress(
                     "dockerfile_generation",
@@ -147,6 +151,8 @@ CMD ["./main"]
             dockerfile = self._customize_template(template, analysis)
             
             # ✅ PHASE 1.1: Progress - Dockerfile complete
+            if progress_callback:
+                await progress_callback("✅ Dockerfile ready with optimizations")
             if progress_notifier:
                 await progress_notifier.complete_stage(
                     "dockerfile_generation",
