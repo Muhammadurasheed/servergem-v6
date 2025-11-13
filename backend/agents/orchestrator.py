@@ -1011,6 +1011,7 @@ Env vars auto-parsed from .env. Never clone twice.
                 elif data.get('progress'):
                     await tracker.emit_build_progress(data['progress'])
             
+            # ✅ PHASE 2: Use resilient build with retry logic
             build_result = await self.gcloud_service.build_image(
                 project_path,
                 service_name,
@@ -1027,9 +1028,19 @@ Env vars auto-parsed from .env. Never clone twice.
                     build_result.get('error', 'Build failed')
                 )
                 self.monitoring.complete_deployment(deployment_id, 'failed')
+                
+                # ✅ PHASE 2: Enhanced error messaging with remediation
+                error_msg = build_result.get('error', 'Build failed')
+                remediation = build_result.get('remediation', [])
+                
+                content = f"❌ **Container Build Failed**\n\n{error_msg}"
+                if remediation:
+                    content += "\n\n**Recommended Actions:**\n"
+                    content += "\n".join(f"{i+1}. {step}" for i, step in enumerate(remediation))
+                
                 return {
                     'type': 'error',
-                    'content': f"❌ **Build failed**\n\n{build_result.get('error')}\n\nCheck:\n• Dockerfile syntax\n• Cloud Build API is enabled\n• Billing is enabled\n• gcloud CLI is authenticated",
+                    'content': content,
                     'timestamp': datetime.now().isoformat()
                 }
             
@@ -1079,14 +1090,91 @@ Env vars auto-parsed from .env. Never clone twice.
                     deploy_result.get('error', 'Deployment failed')
                 )
                 self.monitoring.complete_deployment(deployment_id, 'failed')
+                
+                # ✅ PHASE 2: Enhanced error messaging with remediation
+                error_msg = deploy_result.get('error', 'Deployment failed')
+                remediation = deploy_result.get('remediation', [])
+                
+                content = f"❌ **Cloud Run Deployment Failed**\n\n{error_msg}"
+                if remediation:
+                    content += "\n\n**Recommended Actions:**\n"
+                    content += "\n".join(f"{i+1}. {step}" for i, step in enumerate(remediation))
+                
                 return {
                     'type': 'error',
-                    'content': f"❌ **Deployment failed**\n\n{deploy_result.get('error')}\n\nCheck:\n• Cloud Run API is enabled\n• Service account permissions\n• gcloud CLI is authenticated",
+                    'content': content,
                     'timestamp': datetime.now().isoformat()
                 }
             
             # Only record success if deployment actually succeeded
             self.monitoring.record_stage(deployment_id, 'deploy', 'success', deploy_duration)
+            
+            # ✅ PHASE 2: Post-deployment health verification
+            if progress_callback:
+                await progress_callback({
+                    'type': 'message',
+                    'data': {'content': '🏥 Verifying service health...'}
+                })
+            
+            # Import health check service
+            from services.health_check import HealthCheckService
+            
+            async def health_progress(msg: str):
+                if progress_callback:
+                    await progress_callback({
+                        'type': 'message',
+                        'data': {'content': msg}
+                    })
+            
+            async with HealthCheckService(timeout=30, max_retries=5) as health_checker:
+                health_result = await health_checker.wait_for_service_ready(
+                    service_url=deploy_result['url'],
+                    health_path="/",
+                    progress_callback=health_progress
+                )
+            
+            if not health_result.success:
+                self.monitoring.record_error(
+                    deployment_id,
+                    f"Health check failed: {health_result.error}"
+                )
+                await tracker.emit_error(
+                    'health_verification',
+                    f"Service deployed but failed health checks: {health_result.error}"
+                )
+                
+                content = (
+                    f"⚠️ **Deployment Warning**\n\n"
+                    f"Service deployed to Cloud Run but failed health verification.\n\n"
+                    f"**URL:** {deploy_result['url']}\n\n"
+                    f"**Health Check Issue:** {health_result.error}\n\n"
+                    f"**Recommendations:**\n"
+                    f"1. Check service logs for startup errors\n"
+                    f"2. Verify environment variables are correct\n"
+                    f"3. Ensure application listens on PORT environment variable\n"
+                    f"4. Review container startup command"
+                )
+                
+                return {
+                    'type': 'warning',
+                    'content': content,
+                    'data': {
+                        'url': deploy_result['url'],
+                        'health_check': {
+                            'success': False,
+                            'error': health_result.error,
+                            'response_time_ms': health_result.response_time_ms
+                        }
+                    },
+                    'timestamp': datetime.now().isoformat()
+                }
+            
+            # Health check passed!
+            if progress_callback:
+                await progress_callback({
+                    'type': 'message',
+                    'data': {'content': f'✅ Health verified! Response time: {health_result.response_time_ms:.0f}ms'}
+                })
             
             # Success! Complete deployment
             await tracker.complete_cloud_deployment(deploy_result['url'])
@@ -1131,7 +1219,12 @@ Env vars auto-parsed from .env. Never clone twice.
                         'max_instances': optimal_config.max_instances
                     },
                     'cost_estimate': estimated_cost,
-                    'security_scan': security_scan
+                    'security_scan': security_scan,
+                    'health_check': {
+                        'success': True,
+                        'response_time_ms': health_result.response_time_ms,
+                        'timestamp': health_result.timestamp
+                    }
                 },
                 'deployment_url': deploy_result['url'],
                 'actions': [
