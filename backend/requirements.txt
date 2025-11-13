@@ -8,13 +8,13 @@ google-cloud-aiplatform==1.71.1
 google-cloud-build==3.25.0
 google-cloud-run==0.10.7
 google-cloud-storage==2.18.2
-google-cloud-resource-manager==1.13.1  # ✅ PHASE 3: For pre-flight checks
-google-cloud-artifact-registry==1.12.0  # ✅ PHASE 3: Auto-create registries
-google-generativeai==0.8.5  # ✅ Latest stable with gemini-1.5-flash support
+google-cloud-resource-manager==1.13.1
+google-cloud-artifact-registry==1.12.0
+google-generativeai==0.8.5
 
 # HTTP Client & Async
 requests==2.32.3
-aiohttp==3.9.1  # ✅ PHASE 2: For health checks
+aiohttp==3.9.1  
 aiofiles==24.1.0
 
 # Environment & Config

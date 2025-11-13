@@ -1,7 +1,7 @@
 # Master Prompt: Fix Real-Time Deployment Progress Updates
 
 ## Context
-You are acting as a team of CTOs and Principal Engineers from FAANG companies. You have been tasked with fixing a critical UX issue in a Google Cloud Run deployment platform built with Python Flask backend and React TypeScript frontend, connected via WebSockets.
+You are acting as a team of CTOs and Principal Engineers from FAANG companies. You have been tasked with fixing a critical UX issue in a Google Cloud Run deployment platform built with Python FastAPI backend and React TypeScript frontend, connected via WebSockets.
 
 ## The Critical Problem
 After a user submits a repository URL for deployment, there is a **severe delay** (several seconds to minutes) before any visual feedback appears in the frontend. The current behavior:

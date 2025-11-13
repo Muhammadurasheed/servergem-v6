@@ -7,6 +7,24 @@
       "deployments": 0,
       "memory_used_mb": 0,
       "bandwidth_gb": 2.7939677238464355e-08
+    },
+    "2025-11-13": {
+      "user_id": "user_1762568889190",
+      "date": "2025-11-13",
+      "requests": 5,
+      "deployments": 0,
+      "memory_used_mb": 0,
+      "bandwidth_gb": 8.195638656616211e-08
+    }
+  },
+  "user_1762621179925": {
+    "2025-11-13": {
+      "user_id": "user_1762621179925",
+      "date": "2025-11-13",
+      "requests": 3,
+      "deployments": 0,
+      "memory_used_mb": 0,
+      "bandwidth_gb": 5.4016709327697754e-08
     }
   }
 }

@@ -5,9 +5,9 @@ Code Analyzer Agent - Framework and dependency detection
 import os
 import json
 import re
-import asyncio  # ✅ CRITICAL: Import asyncio for sleep(0) flush
+import asyncio  
 from pathlib import Path
-from typing import Dict, List, Optional, Callable  # ✅ Added Callable
+from typing import Dict, List, Optional, Callable 
 import vertexai
 from vertexai.generative_models import GenerativeModel
 
@@ -27,8 +27,6 @@ class CodeAnalyzerAgent:
         
         project_path = Path(project_path)
         
-        # ✅ PHASE 1.1: Send progress update - Starting analysis
-        # ✅ PHASE 1.1: Progress - Starting analysis WITH flush
         if progress_callback:
             await progress_callback("🔍 Analyzing project structure...")
             await asyncio.sleep(0)  # ✅ Force event loop flush
