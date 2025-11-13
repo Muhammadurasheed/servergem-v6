@@ -29,15 +29,15 @@ class AnalysisService:
         Progress is sent BEFORE each operation starts, not after!
         """
         try:
-            # ✅ FIX 1: Immediate feedback
+            # ✅ FIX 1: Immediate feedback WITH flush
             if progress_callback:
                 await progress_callback("🔍 Starting code analysis...")
-                await asyncio.sleep(0.05)  # Let message reach frontend
+                await asyncio.sleep(0)  # ✅ Force event loop flush
             
-            # ✅ FIX 2: Report BEFORE scanning
+            # ✅ FIX 2: Report BEFORE scanning WITH flush
             if progress_callback:
                 await progress_callback("📂 Scanning project structure...")
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0)  # ✅ Force event loop flush
             
             print(f"[AnalysisService] Analyzing project at {project_path}")
             
@@ -51,25 +51,29 @@ class AnalysisService:
             if 'error' in analysis:
                 return {'success': False, 'error': analysis['error']}
             
-            # ✅ FIX 4: Report findings immediately
+            # ✅ FIX 4: Report findings immediately WITH flush
             framework = analysis.get('framework', 'application')
             language = analysis.get('language', 'unknown')
             
             if progress_callback:
                 await progress_callback(f"✅ Framework detected: {framework}")
+                await asyncio.sleep(0)  # ✅ Force event loop flush
+                
                 await progress_callback(f"📝 Language: {language}")
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0)  # ✅ Force event loop flush
                 
                 dep_count = len(analysis.get('dependencies', []))
                 if dep_count > 0:
                     await progress_callback(f"📦 Found {dep_count} dependencies")
-                    await asyncio.sleep(0.05)
+                    await asyncio.sleep(0)  # ✅ Force event loop flush
             
-            # ✅ FIX 5: Report BEFORE Dockerfile generation
+            # ✅ FIX 5: Report BEFORE Dockerfile generation WITH flush
             if progress_callback:
                 await progress_callback(f"🐳 Starting Dockerfile generation...")
+                await asyncio.sleep(0)  # ✅ Force event loop flush
+                
                 await progress_callback(f"⚙️ Optimizing for {framework} framework...")
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0)  # ✅ Force event loop flush
             
             print(f"[AnalysisService] Generating Dockerfile for {framework}")
             
@@ -80,12 +84,16 @@ class AnalysisService:
                 progress_notifier=progress_notifier
             )
             
-            # ✅ FIX 6: Report completion with details
+            # ✅ FIX 6: Report completion with details WITH flush
             if progress_callback:
                 await progress_callback("✅ Dockerfile generated successfully!")
+                await asyncio.sleep(0)  # ✅ Force event loop flush
+                
                 await progress_callback("🔒 Applied security best practices")
+                await asyncio.sleep(0)  # ✅ Force event loop flush
+                
                 await progress_callback("📦 Multi-stage build configured")
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0)  # ✅ Force event loop flush
             
             # Step 3: Compile report
             report = {

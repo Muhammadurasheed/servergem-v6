@@ -484,10 +484,12 @@ Env vars auto-parsed from .env. Never clone twice.
                             message
                         )
                     await self._send_progress_message(message)
+                    await asyncio.sleep(0)  # ✅ Force event loop flush
                 except Exception as e:
                     print(f"[Orchestrator] Clone progress error: {e}")
             
             await self._send_progress_message("📦 Cloning repository from GitHub...")
+            await asyncio.sleep(0)  # ✅ Force immediate delivery
             
             clone_result = await self.github_service.clone_repository(
                 repo_url, 
@@ -525,6 +527,7 @@ Env vars auto-parsed from .env. Never clone twice.
                 )
             
             await self._send_progress_message(f"✅ Repository cloned: {clone_result['repo_name']} ({clone_result['files_count']} files)")
+            await asyncio.sleep(0)  # ✅ Force immediate delivery
             
             # Step 2: Analyze project with FIXED progress callback
             if progress_notifier:
@@ -534,6 +537,7 @@ Env vars auto-parsed from .env. Never clone twice.
                 )
             
             await self._send_progress_message("🔍 Analyzing project structure and dependencies...")
+            await asyncio.sleep(0)  # ✅ Force immediate delivery
             
             # ✅ FIX 4: Robust progress callback with error handling
             async def analysis_progress(message: str):
@@ -549,6 +553,7 @@ Env vars auto-parsed from .env. Never clone twice.
                     
                     # Always try direct WebSocket send as backup
                     await self._send_progress_message(message)
+                    await asyncio.sleep(0)  # ✅ CRITICAL: Force event loop flush
                     
                 except Exception as e:
                     print(f"[Orchestrator] Progress callback error: {e}")
@@ -602,6 +607,7 @@ Env vars auto-parsed from .env. Never clone twice.
                 )
             
             await self._send_progress_message(f"✅ Analysis complete: {analysis_data['framework']} detected")
+            await asyncio.sleep(0)  # ✅ Force immediate delivery
             
             # Step 3: Generate and save Dockerfile
             if progress_notifier:
@@ -611,6 +617,7 @@ Env vars auto-parsed from .env. Never clone twice.
                 )
             
             await self._send_progress_message("🐳 Generating optimized Dockerfile...")
+            await asyncio.sleep(0)  # ✅ Force immediate delivery
             
             # ✅ PHASE 2: Real-time progress for Dockerfile save
             async def dockerfile_progress(message: str):
@@ -623,6 +630,7 @@ Env vars auto-parsed from .env. Never clone twice.
                             message
                         )
                     await self._send_progress_message(message)
+                    await asyncio.sleep(0)  # ✅ Force event loop flush
                 except Exception as e:
                     print(f"[Orchestrator] Dockerfile progress error: {e}")
             
@@ -643,6 +651,7 @@ Env vars auto-parsed from .env. Never clone twice.
                 )
             
             await self._send_progress_message("✅ Dockerfile generated with optimizations")
+            await asyncio.sleep(0)  # ✅ Force immediate delivery
             
             # Step 4: Create .dockerignore
             self.docker_service.create_dockerignore(
@@ -695,7 +704,7 @@ Env vars auto-parsed from .env. Never clone twice.
 
     async def _send_progress_message(self, message: str):
         """
-        ✅ FIXED: Robust helper to send progress messages
+        ✅ FIXED: Robust helper to send progress messages WITH IMMEDIATE FLUSH
         Uses instance variables set in process_message
         """
         print(f"[Orchestrator] 📨 _send_progress_message called: {message[:60]}")
@@ -715,6 +724,11 @@ Env vars auto-parsed from .env. Never clone twice.
                 },
                 'timestamp': datetime.now().isoformat()
             })
+            
+            # ✅ CRITICAL FIX: Force event loop to flush WebSocket message IMMEDIATELY
+            # Without this, Python batches all messages and sends them together
+            await asyncio.sleep(0)  # Yield control to event loop
+            
             print(f"[Orchestrator] ✅ Progress sent: {message[:60]}...")
         except Exception as e:
             print(f"[Orchestrator] ❌ Error sending progress: {e}")

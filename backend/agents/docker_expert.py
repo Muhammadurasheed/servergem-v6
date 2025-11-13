@@ -2,8 +2,9 @@
 Docker Expert Agent - Optimized Dockerfile generation
 """
 
+import asyncio  # ✅ CRITICAL: Import asyncio for sleep(0) flush
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional, Callable  # ✅ Added Optional, Callable
 import vertexai
 from vertexai.generative_models import GenerativeModel
 
@@ -125,9 +126,10 @@ CMD ["./main"]
     async def generate_dockerfile(self, analysis: Dict, progress_notifier=None, progress_callback=None) -> Dict:
         """Generate optimized Dockerfile based on analysis with real-time progress"""
         
-        # ✅ PHASE 1.1: Send progress - Starting Dockerfile generation
+        # ✅ PHASE 1.1: Send progress - Starting Dockerfile generation WITH flush
         if progress_callback:
             await progress_callback(f"🐳 Generating Dockerfile for {analysis.get('framework', 'unknown')}...")
+            await asyncio.sleep(0)  # ✅ Force event loop flush
         if progress_notifier:
             await progress_notifier.start_stage(
                 "dockerfile_generation",
@@ -137,9 +139,10 @@ CMD ["./main"]
         framework_key = f"{analysis['language']}_{analysis['framework']}"
         
         if framework_key in self.templates:
-            # ✅ PHASE 1.1: Progress - Using template
+            # ✅ PHASE 1.1: Progress - Using template WITH flush
             if progress_callback:
                 await progress_callback(f"📋 Optimizing for {framework_key}")
+                await asyncio.sleep(0)  # ✅ Force event loop flush
             if progress_notifier:
                 await progress_notifier.update_progress(
                     "dockerfile_generation",
@@ -150,9 +153,10 @@ CMD ["./main"]
             template = self.templates[framework_key]
             dockerfile = self._customize_template(template, analysis)
             
-            # ✅ PHASE 1.1: Progress - Dockerfile complete
+            # ✅ PHASE 1.1: Progress - Dockerfile complete WITH flush
             if progress_callback:
                 await progress_callback("✅ Dockerfile ready with optimizations")
+                await asyncio.sleep(0)  # ✅ Force event loop flush
             if progress_notifier:
                 await progress_notifier.complete_stage(
                     "dockerfile_generation",
