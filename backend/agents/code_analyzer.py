@@ -120,11 +120,17 @@ class CodeAnalyzerAgent:
             error_msg = str(e)
             print(f"[CodeAnalyzer] Error: {error_msg}")
             
-            # ✅ FIX: Re-raise quota errors to let orchestrator handle fallback
+            # ✅ FIX: Re-raise quota errors with proper exception type
             # Check if it's a quota/resource exhausted error
             if '429' in error_msg or 'quota' in error_msg.lower() or 'resource exhausted' in error_msg.lower():
                 print(f"[CodeAnalyzer] 🔄 Quota exceeded, re-raising for orchestrator fallback")
-                raise  # Re-raise original exception for orchestrator to catch
+                # Import and re-raise as ResourceExhausted to ensure orchestrator catches it
+                from google.api_core.exceptions import ResourceExhausted
+                if isinstance(e, ResourceExhausted):
+                    raise  # Re-raise original exception
+                else:
+                    # Convert to ResourceExhausted for consistent handling
+                    raise ResourceExhausted(error_msg)
             
             # For other errors, fallback to static analysis
             return self._fallback_analysis(project_path, file_structure)

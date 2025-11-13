@@ -158,7 +158,7 @@ class GCloudService:
         return tar_stream.read()
     
     
-    async def preflight_checks(self, progress_notifier=None) -> Dict:
+    async def preflight_checks(self, progress_notifier=None, progress_callback=None) -> Dict:
         """
         ✅ PHASE 3: Pre-flight GCP environment checks
         Verifies all required APIs and resources before deployment
