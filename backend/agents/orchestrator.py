@@ -278,8 +278,9 @@ Env vars auto-parsed from .env. Never clone twice.
         except Exception as e:
             error_str = str(e).lower()
             
-            # Check for quota/rate limit errors (429)
-            is_quota_error = any(keyword in error_str for keyword in [
+            # ✅ Check for quota/rate limit errors using both string and exception type
+            from google.api_core.exceptions import ResourceExhausted
+            is_quota_error = isinstance(e, ResourceExhausted) or any(keyword in error_str for keyword in [
                 'resource exhausted', '429', 'quota', 'rate limit'
             ])
             
@@ -294,6 +295,7 @@ Env vars auto-parsed from .env. Never clone twice.
                     # Switch to Gemini API fallback
                     print(f"[Orchestrator] ✅ Activating fallback to Gemini API")
                     await self._send_progress_message("⚠️ Vertex AI quota exhausted. Switching to backup AI service...")
+                    await asyncio.sleep(0)  # ✅ Flush message immediately
                     
                     try:
                         import google.generativeai as genai
@@ -318,6 +320,7 @@ Env vars auto-parsed from .env. Never clone twice.
                         
                         print(f"[Orchestrator] ✅ Successfully switched to Gemini API")
                         await self._send_progress_message("✅ Now using Gemini API - deployment continues...")
+                        await asyncio.sleep(0)  # ✅ Flush message immediately
                         return response
                         
                     except Exception as fallback_err:
