@@ -21,12 +21,14 @@ class CodeAnalyzerAgent:
         vertexai.init(project=gcloud_project, location=location)
         self.model = GenerativeModel('gemini-2.0-flash-exp')
     
-    async def analyze_project(self, project_path: str, progress_notifier=None) -> Dict:
+    async def analyze_project(self, project_path: str, progress_notifier=None, progress_callback=None) -> Dict:
         """Analyze project structure and configuration with real-time progress updates"""
         
         project_path = Path(project_path)
         
         # ✅ PHASE 1.1: Send progress update - Starting analysis
+        if progress_callback:
+            await progress_callback("🔍 Analyzing project structure...")
         if progress_notifier:
             await progress_notifier.start_stage(
                 "code_analysis",
@@ -40,6 +42,8 @@ class CodeAnalyzerAgent:
         file_structure = self._scan_directory(project_path)
         
         # ✅ PHASE 1.1: Progress - Scanning files
+        if progress_callback:
+            await progress_callback(f"📂 Scanned {len(file_structure['files'])} files")
         if progress_notifier:
             await progress_notifier.update_progress(
                 "code_analysis",
@@ -51,6 +55,8 @@ class CodeAnalyzerAgent:
         analysis_prompt = self._build_analysis_prompt(file_structure, project_path)
         
         # ✅ PHASE 1.1: Progress - Analyzing with AI
+        if progress_callback:
+            await progress_callback("🤖 AI analyzing code structure...")
         if progress_notifier:
             await progress_notifier.update_progress(
                 "code_analysis",
@@ -88,6 +94,8 @@ class CodeAnalyzerAgent:
             analysis['dockerfile_exists'] = (project_path / 'Dockerfile').exists()
             
             # ✅ PHASE 1.1: Progress - Analysis complete
+            if progress_callback:
+                await progress_callback(f"✅ Detected {analysis.get('framework', 'unknown')} framework")
             if progress_notifier:
                 await progress_notifier.complete_stage(
                     "code_analysis",
