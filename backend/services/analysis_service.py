@@ -16,21 +16,23 @@ class AnalysisService:
         self.code_analyzer = CodeAnalyzerAgent(gcloud_project, location)
         self.docker_expert = DockerExpertAgent(gcloud_project, location)
     
-    async def analyze_and_generate(self, project_path: str, progress_callback=None) -> Dict:
+    async def analyze_and_generate(self, project_path: str, progress_callback=None, progress_notifier=None) -> Dict:
         """
         Full analysis workflow with real-time progress updates:
         1. Analyze codebase
         2. Generate Dockerfile
         3. Return comprehensive report
+        
+        ✅ PHASE 1.1: Now accepts progress_notifier for structured updates
         """
         try:
-            # ✅ PHASE 2: Real-time progress - Analysis Start
+            # ✅ PHASE 1.1: Pass progress_notifier to code analyzer
             print(f"[AnalysisService] Analyzing project at {project_path}")
             if progress_callback:
                 await progress_callback("🔍 Starting code analysis...")
                 await progress_callback("📂 Scanning project structure...")
             
-            analysis = await self.code_analyzer.analyze_project(project_path)
+            analysis = await self.code_analyzer.analyze_project(project_path, progress_notifier=progress_notifier)
             
             # ✅ PHASE 2: Detailed framework detection feedback
             if progress_callback:
@@ -50,13 +52,13 @@ class AnalysisService:
                     'error': analysis['error']
                 }
             
-            # ✅ PHASE 2: Real-time progress - Dockerfile Generation
+            # ✅ PHASE 1.1: Pass progress_notifier to docker expert
             print(f"[AnalysisService] Generating Dockerfile for {analysis['framework']}")
             if progress_callback:
                 await progress_callback(f"🐳 Starting Dockerfile generation...")
                 await progress_callback(f"⚙️  Optimizing for {analysis['framework']} framework...")
             
-            dockerfile_result = await self.docker_expert.generate_dockerfile(analysis)
+            dockerfile_result = await self.docker_expert.generate_dockerfile(analysis, progress_notifier=progress_notifier)
             
             if progress_callback:
                 await progress_callback("✅ Dockerfile generated successfully!")

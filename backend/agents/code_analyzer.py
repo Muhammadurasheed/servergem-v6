@@ -21,10 +21,17 @@ class CodeAnalyzerAgent:
         vertexai.init(project=gcloud_project, location=location)
         self.model = GenerativeModel('gemini-2.0-flash-exp')
     
-    async def analyze_project(self, project_path: str) -> Dict:
-        """Analyze project structure and configuration"""
+    async def analyze_project(self, project_path: str, progress_notifier=None) -> Dict:
+        """Analyze project structure and configuration with real-time progress updates"""
         
         project_path = Path(project_path)
+        
+        # ✅ PHASE 1.1: Send progress update - Starting analysis
+        if progress_notifier:
+            await progress_notifier.start_stage(
+                "code_analysis",
+                "🔍 Analyzing project structure and dependencies..."
+            )
         
         if not project_path.exists():
             return {'error': 'Project path does not exist'}
@@ -32,8 +39,24 @@ class CodeAnalyzerAgent:
         # Gather file information
         file_structure = self._scan_directory(project_path)
         
+        # ✅ PHASE 1.1: Progress - Scanning files
+        if progress_notifier:
+            await progress_notifier.update_progress(
+                "code_analysis",
+                f"📂 Scanned {len(file_structure['files'])} files",
+                25
+            )
+        
         # Use Gemini to intelligently analyze the project
         analysis_prompt = self._build_analysis_prompt(file_structure, project_path)
+        
+        # ✅ PHASE 1.1: Progress - Analyzing with AI
+        if progress_notifier:
+            await progress_notifier.update_progress(
+                "code_analysis",
+                "🤖 Using AI to detect framework and dependencies...",
+                30
+            )
         
         try:
             response = await self.model.generate_content_async(analysis_prompt)
@@ -63,6 +86,19 @@ class CodeAnalyzerAgent:
             # Enhance with static analysis
             analysis['env_vars'] = self._extract_env_vars(project_path)
             analysis['dockerfile_exists'] = (project_path / 'Dockerfile').exists()
+            
+            # ✅ PHASE 1.1: Progress - Analysis complete
+            if progress_notifier:
+                await progress_notifier.complete_stage(
+                    "code_analysis",
+                    f"✅ Project analyzed: {analysis.get('framework', 'unknown')} application",
+                    details={
+                        'framework': analysis.get('framework', 'unknown'),
+                        'language': analysis.get('language', 'unknown'),
+                        'dependencies': len(analysis.get('dependencies', [])),
+                        'env_vars': len(analysis.get('env_vars', []))
+                    }
+                )
             
             return analysis
         

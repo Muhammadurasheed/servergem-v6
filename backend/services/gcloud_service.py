@@ -158,7 +158,7 @@ class GCloudService:
         return tar_stream.read()
     
     
-    async def preflight_checks(self, progress_callback: Optional[Callable] = None) -> Dict:
+    async def preflight_checks(self, progress_notifier=None) -> Dict:
         """
         ✅ PHASE 3: Pre-flight GCP environment checks
         Verifies all required APIs and resources before deployment
@@ -173,8 +173,12 @@ class GCloudService:
         errors = []
         
         try:
-            if progress_callback:
-                await progress_callback("🔍 Running pre-flight checks...")
+            # ✅ PHASE 1.1: Pre-flight checks stage
+            if progress_notifier:
+                await progress_notifier.start_stage(
+                    "repo_access",
+                    "🔍 Running GCP environment checks..."
+                )
             
             # Check 1: Project access
             try:
@@ -183,12 +187,19 @@ class GCloudService:
                 project_name = f"projects/{self.project_id}"
                 project = client.get_project(name=project_name)
                 checks['project_access'] = True
-                if progress_callback:
-                    await progress_callback(f"✅ Project access verified: {self.project_id}")
+                if progress_notifier:
+                    await progress_notifier.update_progress(
+                        "repo_access",
+                        f"✅ Project access verified: {self.project_id}",
+                        15
+                    )
             except Exception as e:
                 errors.append(f"Project access failed: {str(e)}")
-                if progress_callback:
-                    await progress_callback(f"❌ Project access check failed")
+                if progress_notifier:
+                    await progress_notifier.fail_stage(
+                        "repo_access",
+                        f"❌ Project access check failed: {str(e)}"
+                    )
             
             # Check 2: Artifact Registry repository exists (auto-create if missing)
             try:
@@ -200,12 +211,20 @@ class GCloudService:
                 try:
                     repository = ar_client.get_repository(name=repo_name)
                     checks['artifact_registry'] = True
-                    if progress_callback:
-                        await progress_callback("✅ Artifact Registry found")
+                    if progress_notifier:
+                        await progress_notifier.update_progress(
+                            "repo_access",
+                            "✅ Artifact Registry verified",
+                            25
+                        )
                 except google_exceptions.NotFound:
                     # ✅ PHASE 3: Auto-create Artifact Registry
-                    if progress_callback:
-                        await progress_callback("📦 Creating Artifact Registry...")
+                    if progress_notifier:
+                        await progress_notifier.update_progress(
+                            "repo_access",
+                            "📦 Creating Artifact Registry repository...",
+                            20
+                        )
                     
                     parent = f"projects/{self.project_id}/locations/{self.region}"
                     repository = artifactregistry_v1.Repository(
@@ -223,15 +242,39 @@ class GCloudService:
                     await asyncio.to_thread(operation.result, timeout=60)
                     checks['artifact_registry'] = True
                     
-                    if progress_callback:
-                        await progress_callback("✅ Artifact Registry created successfully")
+                    if progress_notifier:
+                        await progress_notifier.update_progress(
+                            "repo_access",
+                            "✅ Artifact Registry created successfully",
+                            30
+                        )
                     
             except Exception as e:
                 errors.append(f"Artifact Registry check failed: {str(e)}")
-                if progress_callback:
-                    await progress_callback(f"❌ Artifact Registry check failed")
+                if progress_notifier:
+                    await progress_notifier.update_progress(
+                        "repo_access",
+                        f"⚠️ Artifact Registry issue: {str(e)[:50]}",
+                        25
+                    )
             
-            # Check 3: Cloud Build API enabled
+            # Pre-flight checks complete
+            if progress_notifier and all(checks.values()):
+                await progress_notifier.complete_stage(
+                    "repo_access",
+                    "✅ All GCP environment checks passed",
+                    details={
+                        'project': self.project_id,
+                        'region': self.region,
+                        'apis_enabled': sum(1 for v in checks.values() if v)
+                    }
+                )
+            elif progress_notifier and errors:
+                await progress_notifier.fail_stage(
+                    "repo_access",
+                    f"❌ Pre-flight checks failed: {'; '.join(errors[:2])}",
+                    details={'errors': errors}
+                )
             try:
                 # Try to list builds to verify API is enabled
                 parent = f"projects/{self.project_id}/locations/{self.region}"

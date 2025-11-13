@@ -122,14 +122,42 @@ CMD ["./main"]
 """
         }
     
-    async def generate_dockerfile(self, analysis: Dict) -> Dict:
-        """Generate optimized Dockerfile based on analysis"""
+    async def generate_dockerfile(self, analysis: Dict, progress_notifier=None) -> Dict:
+        """Generate optimized Dockerfile based on analysis with real-time progress"""
+        
+        # ✅ PHASE 1.1: Send progress - Starting Dockerfile generation
+        if progress_notifier:
+            await progress_notifier.start_stage(
+                "dockerfile_generation",
+                f"📝 Generating optimized Dockerfile for {analysis.get('framework', 'unknown')}..."
+            )
         
         framework_key = f"{analysis['language']}_{analysis['framework']}"
         
         if framework_key in self.templates:
+            # ✅ PHASE 1.1: Progress - Using template
+            if progress_notifier:
+                await progress_notifier.update_progress(
+                    "dockerfile_generation",
+                    f"📋 Using optimized template for {framework_key}",
+                    50
+                )
+            
             template = self.templates[framework_key]
             dockerfile = self._customize_template(template, analysis)
+            
+            # ✅ PHASE 1.1: Progress - Dockerfile complete
+            if progress_notifier:
+                await progress_notifier.complete_stage(
+                    "dockerfile_generation",
+                    "✅ Dockerfile generated with production optimizations",
+                    details={
+                        'template': framework_key,
+                        'size_estimate': self._estimate_image_size(framework_key),
+                        'multi_stage': True,
+                        'security_hardened': True
+                    }
+                )
             
             return {
                 'dockerfile': dockerfile,
@@ -144,7 +172,25 @@ CMD ["./main"]
             }
         
         # Use Gemini for custom frameworks
-        return await self._generate_custom_dockerfile(analysis)
+        # ✅ PHASE 1.1: Progress - Using AI for custom framework
+        if progress_notifier:
+            await progress_notifier.update_progress(
+                "dockerfile_generation",
+                "🤖 Generating custom Dockerfile with AI...",
+                40
+            )
+        
+        result = await self._generate_custom_dockerfile(analysis)
+        
+        # ✅ PHASE 1.1: Progress - Custom Dockerfile complete
+        if progress_notifier:
+            await progress_notifier.complete_stage(
+                "dockerfile_generation",
+                "✅ Custom Dockerfile generated",
+                details={'framework': analysis.get('framework', 'custom')}
+            )
+        
+        return result
     
     def _customize_template(self, template: str, analysis: Dict) -> str:
         """Customize template with project-specific values - ROBUST"""

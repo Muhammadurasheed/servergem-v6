@@ -546,9 +546,11 @@ Env vars auto-parsed from .env. Never clone twice.
                     # Don't fail the analysis if progress update fails
             
             try:
+                # ✅ PHASE 1.1: Pass progress_notifier to analysis service
                 analysis_result = await self.analysis_service.analyze_and_generate(
                     project_path,
-                    progress_callback=analysis_progress  # Pass the fixed callback
+                    progress_callback=analysis_progress,
+                    progress_notifier=progress_notifier  # ✅ NEW: Pass notifier through
                 )
             except Exception as e:
                 error_msg = str(e)
