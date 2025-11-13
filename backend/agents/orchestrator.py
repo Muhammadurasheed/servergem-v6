@@ -299,11 +299,10 @@ Env vars auto-parsed from .env. Never clone twice.
                         import google.generativeai as genai
                         genai.configure(api_key=self.gemini_api_key)
                         
-                        # ✅ CRITICAL: SDK 0.8.5 uses v1beta API
-                        # Available models in v1beta: gemini-pro, gemini-1.5-pro
-                        # gemini-1.5-flash does NOT exist in v1beta!
+                        # ✅ FIX: Use correct model name for v1beta API
+                        # SDK 0.8.5 uses v1beta - must use "models/" prefix or "-latest" suffix
                         backup_model = genai.GenerativeModel(
-                            'gemini-1.5-pro',  # ✅ Correct model for v1beta API
+                            'models/gemini-1.5-flash',  # ✅ Correct model for v1beta API with prefix
                             tools=[self._get_function_declarations_genai()],
                             system_instruction=self.model._system_instruction if hasattr(self.model, '_system_instruction') else None
                         )
@@ -353,8 +352,13 @@ Env vars auto-parsed from .env. Never clone twice.
         """
         
         # ✅ CRITICAL FIX: Store BEFORE any async operations
+        print(f"[Orchestrator] 🔧 Setting up progress context for session {session_id}")
         self.session_id = session_id
         self.safe_send = safe_send
+        print(f"[Orchestrator] ✅ Progress context set: safe_send={bool(self.safe_send)}, session_id={self.session_id}")
+        
+        # ✅ TEST: Send immediate progress message
+        await self._send_progress_message("🚀 ServerGem AI is processing your request...")
     
         # Initialize chat session if needed
         if not self.chat_session:
@@ -694,11 +698,15 @@ Env vars auto-parsed from .env. Never clone twice.
         ✅ FIXED: Robust helper to send progress messages
         Uses instance variables set in process_message
         """
+        print(f"[Orchestrator] 📨 _send_progress_message called: {message[:60]}")
+        print(f"[Orchestrator] 🔍 safe_send={bool(self.safe_send)}, session_id={bool(self.session_id)}")
+        
         if not self.safe_send or not self.session_id:
             print(f"[Orchestrator] ⚠️ Progress disabled: safe_send={bool(self.safe_send)}, session_id={bool(self.session_id)}")
             return
         
         try:
+            print(f"[Orchestrator] 📤 Sending progress to session {self.session_id}")
             await self.safe_send(self.session_id, {
                 'type': 'message',
                 'data': {
