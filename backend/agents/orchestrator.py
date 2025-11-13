@@ -102,6 +102,10 @@ Env vars auto-parsed from .env. Never clone twice.
         self.project_context: Dict[str, Any] = {}
         self.chat_session = None
         
+        # ✅ CRITICAL FIX: Add instance variables for progress messaging
+        self.safe_send: Optional[Callable] = None
+        self.session_id: Optional[str] = None
+        
         # Initialize real services - with proper error handling
         try:
             from services.github_service import GitHubService
@@ -342,12 +346,13 @@ Env vars auto-parsed from .env. Never clone twice.
         safe_send: Optional[Callable] = None
     ) -> Dict[str, Any]:
         """
-        Main entry point: processes user message with Gemini ADK function calling
+        Main entry point with FIXED progress messaging
         
-        CRITICAL FIX: Store safe_send IMMEDIATELY before any async operations
+        ✅ CRITICAL FIX: Store safe_send/session_id BEFORE any async operations
+        Now ALL methods can send progress messages!
         """
         
-        # ✅ Store session info BEFORE any async operations
+        # ✅ CRITICAL FIX: Store BEFORE any async operations
         self.session_id = session_id
         self.safe_send = safe_send
     
@@ -686,11 +691,11 @@ Env vars auto-parsed from .env. Never clone twice.
 
     async def _send_progress_message(self, message: str):
         """
-        ✅ FIX: Robust helper to send progress messages during analysis
-        CRITICAL: This method must be called AFTER safe_send is stored in process_message
+        ✅ FIXED: Robust helper to send progress messages
+        Uses instance variables set in process_message
         """
         if not self.safe_send or not self.session_id:
-            print(f"[Orchestrator] ⚠️ Cannot send progress: safe_send={bool(self.safe_send)}, session_id={bool(self.session_id)}")
+            print(f"[Orchestrator] ⚠️ Progress disabled: safe_send={bool(self.safe_send)}, session_id={bool(self.session_id)}")
             return
         
         try:
@@ -702,7 +707,7 @@ Env vars auto-parsed from .env. Never clone twice.
                 },
                 'timestamp': datetime.now().isoformat()
             })
-            print(f"[Orchestrator] ✅ Sent progress: {message[:50]}...")
+            print(f"[Orchestrator] ✅ Progress sent: {message[:60]}...")
         except Exception as e:
             print(f"[Orchestrator] ❌ Error sending progress: {e}")
     
