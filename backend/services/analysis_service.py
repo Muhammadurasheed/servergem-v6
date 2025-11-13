@@ -4,7 +4,8 @@ Integrates CodeAnalyzer with real project paths
 """
 
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional, Callable
+import asyncio
 from agents.code_analyzer import CodeAnalyzerAgent
 from agents.docker_expert import DockerExpertAgent
 
@@ -16,54 +17,75 @@ class AnalysisService:
         self.code_analyzer = CodeAnalyzerAgent(gcloud_project, location)
         self.docker_expert = DockerExpertAgent(gcloud_project, location)
     
-    async def analyze_and_generate(self, project_path: str, progress_callback=None, progress_notifier=None) -> Dict:
+    async def analyze_and_generate(
+        self, 
+        project_path: str, 
+        progress_callback: Optional[Callable] = None,
+        progress_notifier=None
+    ) -> Dict:
         """
-        Full analysis workflow with real-time progress updates:
-        1. Analyze codebase
-        2. Generate Dockerfile
-        3. Return comprehensive report
+        ✅ FIXED: Full analysis workflow with granular real-time progress
         
-        ✅ PHASE 1.1: Now accepts progress_notifier for structured updates
+        Progress is sent BEFORE each operation starts, not after!
         """
         try:
-            # ✅ PHASE 1.1: Pass progress_notifier to code analyzer
-            print(f"[AnalysisService] Analyzing project at {project_path}")
+            # ✅ FIX 1: Immediate feedback
             if progress_callback:
                 await progress_callback("🔍 Starting code analysis...")
-                await progress_callback("📂 Scanning project structure...")
+                await asyncio.sleep(0.05)  # Let message reach frontend
             
-            analysis = await self.code_analyzer.analyze_project(project_path, progress_notifier=progress_notifier)
-            
-            # ✅ PHASE 2: Detailed framework detection feedback
+            # ✅ FIX 2: Report BEFORE scanning
             if progress_callback:
-                framework = analysis.get('framework', 'application')
-                language = analysis.get('language', 'unknown')
+                await progress_callback("📂 Scanning project structure...")
+                await asyncio.sleep(0.05)
+            
+            print(f"[AnalysisService] Analyzing project at {project_path}")
+            
+            # ✅ FIX 3: Pass progress callback to code analyzer
+            analysis = await self.code_analyzer.analyze_project(
+                project_path, 
+                progress_callback=progress_callback,
+                progress_notifier=progress_notifier
+            )
+            
+            if 'error' in analysis:
+                return {'success': False, 'error': analysis['error']}
+            
+            # ✅ FIX 4: Report findings immediately
+            framework = analysis.get('framework', 'application')
+            language = analysis.get('language', 'unknown')
+            
+            if progress_callback:
                 await progress_callback(f"✅ Framework detected: {framework}")
                 await progress_callback(f"📝 Language: {language}")
+                await asyncio.sleep(0.05)
                 
-                # Report dependencies
                 dep_count = len(analysis.get('dependencies', []))
                 if dep_count > 0:
                     await progress_callback(f"📦 Found {dep_count} dependencies")
+                    await asyncio.sleep(0.05)
             
-            if 'error' in analysis:
-                return {
-                    'success': False,
-                    'error': analysis['error']
-                }
-            
-            # ✅ PHASE 1.1: Pass progress_notifier to docker expert
-            print(f"[AnalysisService] Generating Dockerfile for {analysis['framework']}")
+            # ✅ FIX 5: Report BEFORE Dockerfile generation
             if progress_callback:
                 await progress_callback(f"🐳 Starting Dockerfile generation...")
-                await progress_callback(f"⚙️  Optimizing for {analysis['framework']} framework...")
+                await progress_callback(f"⚙️ Optimizing for {framework} framework...")
+                await asyncio.sleep(0.05)
             
-            dockerfile_result = await self.docker_expert.generate_dockerfile(analysis, progress_notifier=progress_notifier)
+            print(f"[AnalysisService] Generating Dockerfile for {framework}")
             
+            # Pass progress to docker expert
+            dockerfile_result = await self.docker_expert.generate_dockerfile(
+                analysis, 
+                progress_callback=progress_callback,
+                progress_notifier=progress_notifier
+            )
+            
+            # ✅ FIX 6: Report completion with details
             if progress_callback:
                 await progress_callback("✅ Dockerfile generated successfully!")
                 await progress_callback("🔒 Applied security best practices")
                 await progress_callback("📦 Multi-stage build configured")
+                await asyncio.sleep(0.05)
             
             # Step 3: Compile report
             report = {
@@ -95,6 +117,9 @@ class AnalysisService:
             return report
             
         except Exception as e:
+            print(f"[AnalysisService] ❌ Error: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {
                 'success': False,
                 'error': f'Analysis failed: {str(e)}'

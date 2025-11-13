@@ -29,6 +29,9 @@ export const useChat = (): UseChatReturn => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   
+  // ✅ FIX: Track if we've shown first progress (to clear typing)
+  const [hasReceivedProgress, setHasReceivedProgress] = useState(false);
+  
   // ✅ PHASE 1.2: State for deployment progress tracking
   const [activeDeployment, setActiveDeployment] = useState<{
     deploymentId: string;
@@ -123,23 +126,26 @@ export const useChat = (): UseChatReturn => {
         break;
         
       case 'typing':
-        console.log('[useChat] Setting typing to true');
-        // ✅ FIX: Don't show typing indicator for too long - will be cleared by first progress message
+        console.log('[useChat] ⏳ AI is thinking...');
         setIsTyping(true);
+        setHasReceivedProgress(false); // Reset progress flag
         
-        // Auto-clear typing after 3 seconds if no message arrives (prevents stuck bouncing dots)
+        // Auto-clear after 5 seconds as fallback
         setTimeout(() => {
           setIsTyping(false);
-        }, 3000);
+        }, 5000);
         break;
       
       case 'deployment_started':
-        console.log('[useChat] 🚀 Deployment started:', (serverMessage as any).deployment_id);
-        setIsTyping(false); // Clear typing immediately
+        console.log('[useChat] 🚀 Deployment started!');
+        
+        // ✅ FIX: Clear typing IMMEDIATELY
+        setIsTyping(false);
+        setHasReceivedProgress(true);
         
         const deploymentMsg = serverMessage as any;
         
-        // ✅ PHASE 1.2: Initialize deployment tracking state
+        // Initialize deployment tracking
         setActiveDeployment({
           deploymentId: deploymentMsg.deployment_id,
           stages: DEPLOYMENT_STAGES.map(s => ({ ...s })), // Clone stages
@@ -161,10 +167,14 @@ export const useChat = (): UseChatReturn => {
         break;
       
       case 'deployment_progress':
-        console.log('[useChat] 📊 Deployment progress:', (serverMessage as any).stage, (serverMessage as any).status);
-        setIsTyping(false); // Clear typing indicator
+        console.log('[useChat] 📊 Progress update:', (serverMessage as any).stage);
         
-        // ✅ PHASE 1.2: Update deployment state instead of adding individual messages
+        // ✅ FIX: Clear typing on FIRST progress message
+        if (!hasReceivedProgress) {
+          setIsTyping(false);
+          setHasReceivedProgress(true);
+        }
+        
         const progressMsg = serverMessage as any;
         
         setActiveDeployment(prev => {
@@ -237,42 +247,45 @@ export const useChat = (): UseChatReturn => {
         break;
         
       case 'message':
-        console.log('[useChat] Setting typing to false, adding message');
+        console.log('[useChat] 💬 Message received');
+        
+        // ✅ FIX: Clear typing immediately on ANY message
         setIsTyping(false);
+        setHasReceivedProgress(true);
         
         const msgData = serverMessage.data as any;
         
-        // ✅ FIX: Check for env vars at BOTH data level AND top level of serverMessage
-        const needsEnvVars = msgData?.request_env_vars || (serverMessage as any).request_env_vars;
-        const detectedEnvVars = msgData?.detected_env_vars || (serverMessage as any).detected_env_vars || [];
+        // Check for progress messages (show them in chat too!)
+        const isProgress = msgData?.metadata?.type === 'progress';
         
-        if (needsEnvVars) {
-          console.log('[useChat] ✅ Analysis complete, REQUESTING ENV VARS!');
-          console.log('[useChat] Detected env vars:', detectedEnvVars);
-          
+        if (isProgress) {
+          // ✅ FIX: Show progress messages in chat with special styling
           addAssistantMessage({
             content: msgData.content,
-            metadata: { 
-              type: 'analysis_with_env_request',
-              request_env_vars: true,
-              detected_env_vars: detectedEnvVars
-            }
-          });
-          
-          // Trigger env vars UI
-          sonnerToast.info('Environment Variables Required', {
-            description: `Please provide ${detectedEnvVars.length} environment variable(s) to continue.`,
-            duration: 5000,
+            metadata: { type: 'progress', timestamp: new Date().toISOString() }
           });
         } else {
-          // Handle progress messages vs regular messages
-          const isProgress = msgData?.metadata?.type === 'progress';
+          // ✅ FIX: Check for env vars at BOTH data level AND top level of serverMessage
+          const needsEnvVars = msgData?.request_env_vars || (serverMessage as any).request_env_vars;
+          const detectedEnvVars = msgData?.detected_env_vars || (serverMessage as any).detected_env_vars || [];
           
-          addAssistantMessage({
-            content: msgData.content,
-            actions: msgData.actions,
-            metadata: isProgress ? { type: 'progress' } : msgData.metadata,
-          });
+          if (needsEnvVars) {
+            console.log('[useChat] ✅ Requesting env vars from user');
+            addAssistantMessage({
+              content: msgData.content,
+              metadata: { 
+                type: 'analysis_with_env_request',
+                request_env_vars: true,
+                detected_env_vars: detectedEnvVars
+              }
+            });
+          } else {
+            addAssistantMessage({
+              content: msgData.content,
+              actions: msgData.actions,
+              metadata: msgData.metadata,
+            });
+          }
         }
         break;
         
@@ -373,6 +386,7 @@ export const useChat = (): UseChatReturn => {
         
       case 'error':
         setIsTyping(false);
+        setHasReceivedProgress(true);
         
         // Handle specific error codes
         const errorCode = (serverMessage as any).code;
@@ -498,6 +512,7 @@ export const useChat = (): UseChatReturn => {
   const clearMessages = useCallback(() => {
     setMessages([]);
     setIsTyping(false);
+    setHasReceivedProgress(false);
   }, []);
   
   // ========================================================================
