@@ -5,8 +5,9 @@ Code Analyzer Agent - Framework and dependency detection
 import os
 import json
 import re
+import asyncio  # ✅ CRITICAL: Import asyncio for sleep(0) flush
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Callable  # ✅ Added Callable
 import vertexai
 from vertexai.generative_models import GenerativeModel
 
@@ -27,8 +28,10 @@ class CodeAnalyzerAgent:
         project_path = Path(project_path)
         
         # ✅ PHASE 1.1: Send progress update - Starting analysis
+        # ✅ PHASE 1.1: Progress - Starting analysis WITH flush
         if progress_callback:
             await progress_callback("🔍 Analyzing project structure...")
+            await asyncio.sleep(0)  # ✅ Force event loop flush
         if progress_notifier:
             await progress_notifier.start_stage(
                 "code_analysis",
@@ -41,9 +44,10 @@ class CodeAnalyzerAgent:
         # Gather file information
         file_structure = self._scan_directory(project_path)
         
-        # ✅ PHASE 1.1: Progress - Scanning files
+        # ✅ PHASE 1.1: Progress - Scanning files WITH flush
         if progress_callback:
             await progress_callback(f"📂 Scanned {len(file_structure['files'])} files")
+            await asyncio.sleep(0)  # ✅ Force event loop flush
         if progress_notifier:
             await progress_notifier.update_progress(
                 "code_analysis",
@@ -54,9 +58,10 @@ class CodeAnalyzerAgent:
         # Use Gemini to intelligently analyze the project
         analysis_prompt = self._build_analysis_prompt(file_structure, project_path)
         
-        # ✅ PHASE 1.1: Progress - Analyzing with AI
+        # ✅ PHASE 1.1: Progress - Analyzing with AI WITH flush
         if progress_callback:
             await progress_callback("🤖 AI analyzing code structure...")
+            await asyncio.sleep(0)  # ✅ Force event loop flush
         if progress_notifier:
             await progress_notifier.update_progress(
                 "code_analysis",
@@ -93,9 +98,10 @@ class CodeAnalyzerAgent:
             analysis['env_vars'] = self._extract_env_vars(project_path)
             analysis['dockerfile_exists'] = (project_path / 'Dockerfile').exists()
             
-            # ✅ PHASE 1.1: Progress - Analysis complete
+            # ✅ PHASE 1.1: Progress - Analysis complete WITH flush
             if progress_callback:
                 await progress_callback(f"✅ Detected {analysis.get('framework', 'unknown')} framework")
+                await asyncio.sleep(0)  # ✅ Force event loop flush
             if progress_notifier:
                 await progress_notifier.complete_stage(
                     "code_analysis",
@@ -114,9 +120,11 @@ class CodeAnalyzerAgent:
             error_msg = str(e)
             print(f"[CodeAnalyzer] Error: {error_msg}")
             
-            # Check if it's a quota error and re-raise to notify user
+            # ✅ FIX: Re-raise quota errors to let orchestrator handle fallback
+            # Check if it's a quota/resource exhausted error
             if '429' in error_msg or 'quota' in error_msg.lower() or 'resource exhausted' in error_msg.lower():
-                raise Exception(f"🚨 Gemini API Quota Exceeded: {error_msg}. Please check your API quota at https://ai.google.dev/")
+                print(f"[CodeAnalyzer] 🔄 Quota exceeded, re-raising for orchestrator fallback")
+                raise  # Re-raise original exception for orchestrator to catch
             
             # For other errors, fallback to static analysis
             return self._fallback_analysis(project_path, file_structure)
