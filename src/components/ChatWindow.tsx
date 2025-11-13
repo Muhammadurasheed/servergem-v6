@@ -19,6 +19,7 @@ const ChatWindow = ({ onClose, initialMessage }: ChatWindowProps) => {
     connectionStatus,
     sendMessage,
     sendStructuredMessage,
+    activeDeployment, // ✅ PHASE 1.2: Get deployment state
   } = useChat();
   
   const [isMinimized, setIsMinimized] = useState(false);
@@ -254,6 +255,7 @@ const ChatWindow = ({ onClose, initialMessage }: ChatWindowProps) => {
                     <ChatMessage 
                       message={message}
                       sendStructuredMessage={sendStructuredMessage}
+                      activeDeployment={activeDeployment} // ✅ PHASE 1.2: Pass deployment state
                       onEnvSubmit={(envVars) => {
                         // Send structured env vars data to backend via WebSocket
                         sendStructuredMessage('env_vars_uploaded', {

@@ -10,6 +10,7 @@ import { useWebSocketContext } from '@/contexts/WebSocketContext';
 import { UseChatReturn, ChatMessage, ServerMessage } from '@/types/websocket';
 import { useToast } from '@/hooks/use-toast';
 import { toast as sonnerToast } from 'sonner';
+import { DEPLOYMENT_STAGES } from '@/types/deployment'; // ✅ Import deployment stages
 
 /**
  * Hook for chat functionality
@@ -27,6 +28,16 @@ export const useChat = (): UseChatReturn => {
   const { toast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
+  
+  // ✅ PHASE 1.2: State for deployment progress tracking
+  const [activeDeployment, setActiveDeployment] = useState<{
+    deploymentId: string;
+    stages: any[];
+    currentStage: string;
+    overallProgress: number;
+    status: 'deploying' | 'success' | 'failed';
+    startTime: string;
+  } | null>(null);
   
   // Debug: Log state changes
   useEffect(() => {
@@ -124,80 +135,104 @@ export const useChat = (): UseChatReturn => {
       
       case 'deployment_started':
         console.log('[useChat] 🚀 Deployment started:', (serverMessage as any).deployment_id);
-        setIsTyping(true);
+        setIsTyping(false); // Clear typing immediately
         
         const deploymentMsg = serverMessage as any;
-        const deployStartContent = `## 🚀 Deployment Started\n\n${deploymentMsg.data?.message || 'Starting deployment process to Cloud Run...'}\n\n**Deployment ID:** \`${deploymentMsg.deployment_id}\`\n\n---\n\n*Real-time updates will appear below as each stage completes...*`;
         
+        // ✅ PHASE 1.2: Initialize deployment tracking state
+        setActiveDeployment({
+          deploymentId: deploymentMsg.deployment_id,
+          stages: DEPLOYMENT_STAGES.map(s => ({ ...s })), // Clone stages
+          currentStage: 'repo_access',
+          overallProgress: 0,
+          status: 'deploying',
+          startTime: new Date().toISOString()
+        });
+        
+        // Add message with deployment logs component
         addAssistantMessage({
-          content: deployStartContent,
-          metadata: { type: 'deployment_started', deployment_id: deploymentMsg.deployment_id }
+          content: `Starting deployment to Cloud Run...`,
+          metadata: { 
+            type: 'deployment_started', 
+            deployment_id: deploymentMsg.deployment_id,
+            showLogs: true // Flag to render DeploymentLogs component
+          }
         });
         break;
       
       case 'deployment_progress':
         console.log('[useChat] 📊 Deployment progress:', (serverMessage as any).stage, (serverMessage as any).status);
-        // ✅ FIX: Clear typing indicator immediately when progress updates start arriving
-        setIsTyping(false);
+        setIsTyping(false); // Clear typing indicator
         
-        // Add beautifully formatted progress update
+        // ✅ PHASE 1.2: Update deployment state instead of adding individual messages
         const progressMsg = serverMessage as any;
-        const stageIcons: Record<string, string> = {
-          repo_clone: '📦',
-          code_analysis: '🔍',
-          dockerfile_generation: '🐳',
-          security_scan: '🔒',
-          container_build: '🏗️',
-          cloud_deployment: '☁️',
-        };
         
-        const stageNames: Record<string, string> = {
-          repo_clone: 'Repository Clone',
-          code_analysis: 'Code Analysis',
-          dockerfile_generation: 'Dockerfile Generation',
-          security_scan: 'Security Scan',
-          container_build: 'Container Build',
-          cloud_deployment: 'Cloud Deployment',
-        };
-        
-        const icon = stageIcons[progressMsg.stage] || '⚙️';
-        const stageName = stageNames[progressMsg.stage] || progressMsg.stage;
-        
-        let statusIcon = '';
-        let statusText = '';
-        
-        if (progressMsg.status === 'success') {
-          statusIcon = '✅';
-          statusText = 'Complete';
-        } else if (progressMsg.status === 'error') {
-          statusIcon = '❌';
-          statusText = 'Failed';
-        } else if (progressMsg.status === 'in-progress') {
-          statusIcon = '⏳';
-          statusText = 'In Progress';
-        }
-        
-        let content = `### ${icon} ${stageName} ${statusIcon}\n\n`;
-        content += `**Status:** ${statusText}`;
-        
-        if (progressMsg.progress !== undefined && progressMsg.progress > 0) {
-          content += ` - ${progressMsg.progress}%`;
-        }
-        
-        content += `\n\n${progressMsg.message}`;
-        
-        // Add details in clean format
-        if (progressMsg.details) {
-          content += '\n\n**Details:**';
-          Object.entries(progressMsg.details).forEach(([key, value]) => {
-            const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
-            content += `\n- ${formattedKey}: \`${value}\``;
+        setActiveDeployment(prev => {
+          if (!prev) {
+            console.warn('[useChat] No active deployment to update');
+            return prev;
+          }
+
+          // Update the specific stage
+          const updatedStages = prev.stages.map(stage => {
+            if (stage.id === progressMsg.stage) {
+              return {
+                ...stage,
+                status: progressMsg.status,
+                message: progressMsg.message,
+                details: progressMsg.details ? Object.entries(progressMsg.details).map(([k, v]) => {
+                  const key = k.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
+                  return `${key}: ${v}`;
+                }) : stage.details,
+                endTime: progressMsg.status === 'success' || progressMsg.status === 'error' 
+                  ? new Date().toISOString() 
+                  : stage.endTime,
+                startTime: stage.startTime || new Date().toISOString()
+              };
+            }
+            return stage;
           });
-        }
-        
-        addAssistantMessage({
-          content,
-          metadata: { type: 'deployment_progress', stage: progressMsg.stage }
+
+          // Calculate duration for completed stages
+          updatedStages.forEach(stage => {
+            if ((stage.status === 'success' || stage.status === 'error') && stage.startTime && stage.endTime) {
+              const start = new Date(stage.startTime).getTime();
+              const end = new Date(stage.endTime).getTime();
+              stage.duration = Math.round((end - start) / 1000);
+            }
+          });
+
+          // Calculate overall progress
+          const completedStages = updatedStages.filter(s => s.status === 'success').length;
+          const overallProgress = Math.round((completedStages / updatedStages.length) * 100);
+
+          return {
+            ...prev,
+            stages: updatedStages,
+            currentStage: progressMsg.stage,
+            overallProgress,
+            status: progressMsg.status === 'error' ? 'failed' : prev.status
+          };
+        });
+
+        // Update the deployment message in place (find and replace)
+        setMessages(prevMessages => {
+          const deploymentMsgIndex = prevMessages.findIndex(
+            m => m.metadata?.type === 'deployment_started' && m.metadata?.showLogs
+          );
+          
+          if (deploymentMsgIndex === -1) return prevMessages;
+
+          const updatedMessages = [...prevMessages];
+          updatedMessages[deploymentMsgIndex] = {
+            ...updatedMessages[deploymentMsgIndex],
+            metadata: {
+              ...updatedMessages[deploymentMsgIndex].metadata,
+              lastUpdate: new Date().toISOString() // Trigger re-render
+            }
+          };
+
+          return updatedMessages;
         });
         break;
         
@@ -251,10 +286,45 @@ export const useChat = (): UseChatReturn => {
         
         const deployData = serverMessage.data;
         const isSuccess = deployData?.status === 'success';
+        
+        // ✅ PHASE 1.2: Update deployment to success/failed status
+        setActiveDeployment(prev => {
+          if (!prev) return prev;
+          
+          return {
+            ...prev,
+            status: isSuccess ? 'success' : 'failed',
+            overallProgress: 100
+          };
+        });
+        
+        // Update the deployment message one final time
+        setMessages(prevMessages => {
+          const deploymentMsgIndex = prevMessages.findIndex(
+            m => m.metadata?.type === 'deployment_started' && m.metadata?.showLogs
+          );
+          
+          if (deploymentMsgIndex === -1) return prevMessages;
+
+          const updatedMessages = [...prevMessages];
+          updatedMessages[deploymentMsgIndex] = {
+            ...updatedMessages[deploymentMsgIndex],
+            metadata: {
+              ...updatedMessages[deploymentMsgIndex].metadata,
+              lastUpdate: new Date().toISOString(),
+              deploymentUrl: deployData?.url,
+              error: deployData?.error
+            }
+          };
+
+          return updatedMessages;
+        });
+        
+        // Add summary message after logs
         const completeEmoji = isSuccess ? '🎉' : '❌';
         const completeTitle = isSuccess ? 'Deployment Successful!' : 'Deployment Failed';
         
-        let completeContent = `## ${completeEmoji} ${completeTitle}\n\n---\n\n`;
+        let completeContent = `## ${completeEmoji} ${completeTitle}\n\n`;
         completeContent += deployData?.message || 'Deployment process completed.';
         
         if (deployData?.url) {
@@ -265,14 +335,6 @@ export const useChat = (): UseChatReturn => {
         
         if (deployData?.error) {
           completeContent += `\n\n### ❌ Error Details\n\n\`\`\`\n${deployData.error}\n\`\`\``;
-        }
-        
-        if (deployData?.details) {
-          completeContent += '\n\n### 📊 Deployment Summary\n';
-          Object.entries(deployData.details).forEach(([key, value]) => {
-            const formattedKey = key.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
-            completeContent += `\n- **${formattedKey}:** \`${value}\``;
-          });
         }
         
         const completeMessage: ChatMessage = {
@@ -480,6 +542,7 @@ export const useChat = (): UseChatReturn => {
     clearMessages,
     connectionStatus,
     sendStructuredMessage,
+    activeDeployment, // ✅ PHASE 1.2: Expose deployment state
     connect: () => console.log('[useChat] connect() is handled by WebSocketProvider'),
     disconnect: () => console.log('[useChat] disconnect() is handled by WebSocketProvider'),
   };

@@ -277,4 +277,14 @@ export interface UseChatReturn {
   // Connection control
   connect: () => void;
   disconnect: () => void;
+  
+  // ✅ PHASE 1.2: Deployment progress state
+  activeDeployment: {
+    deploymentId: string;
+    stages: any[];
+    currentStage: string;
+    overallProgress: number;
+    status: 'deploying' | 'success' | 'failed';
+    startTime: string;
+  } | null;
 }

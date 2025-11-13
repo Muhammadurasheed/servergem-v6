@@ -5,14 +5,16 @@ import remarkGfm from "remark-gfm";
 import { User, Sparkles, Loader2 } from "lucide-react";
 import type { ChatMessage } from "@/types/websocket";
 import { EnvVariablesInput, EnvVariable } from "./chat/EnvVariablesInput";
+import { DeploymentLogs } from "./chat/DeploymentLogs"; // ✅ PHASE 1.2: Import DeploymentLogs
 
 interface ChatMessageProps {
   message: ChatMessage;
   onEnvSubmit?: (envVars: EnvVariable[]) => void;
   sendStructuredMessage?: (type: string, data: any) => void;
+  activeDeployment?: any; // ✅ PHASE 1.2: Add deployment state
 }
 
-const ChatMessageComponent = ({ message, onEnvSubmit, sendStructuredMessage }: ChatMessageProps) => {
+const ChatMessageComponent = ({ message, onEnvSubmit, sendStructuredMessage, activeDeployment }: ChatMessageProps) => {
   const isUser = message.role === "user";
   const time = message.timestamp.toLocaleTimeString("en-US", {
     hour: "2-digit",
@@ -35,6 +37,9 @@ const ChatMessageComponent = ({ message, onEnvSubmit, sendStructuredMessage }: C
   
   // Check if this is a progress message (should show with loader)
   const isProgressMessage = message.metadata?.type === 'progress';
+  
+  // ✅ PHASE 1.2: Check if this message should render deployment logs
+  const showDeploymentLogs = message.metadata?.type === 'deployment_started' && message.metadata?.showLogs;
 
   return (
     <div
@@ -114,6 +119,18 @@ const ChatMessageComponent = ({ message, onEnvSubmit, sendStructuredMessage }: C
             </div>
           )}
         </div>
+        
+        {/* ✅ PHASE 1.2: Render deployment logs if this is a deployment message */}
+        {showDeploymentLogs && activeDeployment && (
+          <div className="mt-3 w-full">
+            <DeploymentLogs
+              stages={activeDeployment.stages}
+              currentStage={activeDeployment.currentStage}
+              overallProgress={activeDeployment.overallProgress}
+              status={activeDeployment.status}
+            />
+          </div>
+        )}
         
         {/* Show env input if AI is requesting env vars */}
         {requestsEnvVars && onEnvSubmit && (
