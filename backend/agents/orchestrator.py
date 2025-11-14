@@ -123,7 +123,7 @@ Env vars auto-parsed from .env. Never clone twice.
                 gcloud_project or 'servergem-platform'
             ) if gcloud_project else None
             self.docker_service = DockerService()
-            self.analysis_service = AnalysisService(gcloud_project, location)
+            self.analysis_service = AnalysisService(gcloud_project, location, gemini_api_key)
             
             # Production services
             self.monitoring = monitoring
