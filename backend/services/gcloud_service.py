@@ -548,7 +548,7 @@ class GCloudService:
             build_id = operation.metadata.build.id
             self.logger.info(f"Cloud Build started: {build_id}")
             
-            # Poll for completion
+            # Poll for completion with REAL-TIME updates
             progress = 30
             while not operation.done():
                 await asyncio.sleep(5)
@@ -560,6 +560,7 @@ class GCloudService:
                         'progress': progress,
                         'message': f'Building Docker image... ({progress}%)',
                     })
+                    await asyncio.sleep(0)  # ✅ CRITICAL: Force immediate flush to frontend
             
             # Check result
             result = operation.result()

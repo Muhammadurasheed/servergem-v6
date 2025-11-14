@@ -301,10 +301,10 @@ Env vars auto-parsed from .env. Never clone twice.
                         import google.generativeai as genai
                         genai.configure(api_key=self.gemini_api_key)
                         
-                        # ✅ FIX: Use correct model name for v1beta API
-                        # SDK 0.8.5 uses v1beta - must use "models/" prefix or "-latest" suffix
+                        # ✅ CRITICAL FIX: Use model name WITHOUT "models/" prefix for v1beta API
+                        # SDK 0.8.5 v1beta expects: "gemini-1.5-flash" NOT "models/gemini-1.5-flash"
                         backup_model = genai.GenerativeModel(
-                            'models/gemini-1.5-flash',  # ✅ Correct model for v1beta API with prefix
+                            'gemini-1.5-flash',  # ✅ Correct: No prefix for v1beta API
                             tools=[self._get_function_declarations_genai()],
                             system_instruction=self.model._system_instruction if hasattr(self.model, '_system_instruction') else None
                         )
@@ -1031,15 +1031,22 @@ Env vars auto-parsed from .env. Never clone twice.
             build_start = time.time()
             
             async def build_progress(data):
-                """Forward build progress to tracker"""
+                """Forward build progress to tracker - REAL-TIME"""
                 if data.get('step'):
                     await tracker.emit_build_step(
                         data['step'],
                         data.get('total_steps', 10),
                         data.get('description', 'Building...')
                     )
+                    await asyncio.sleep(0)  # ✅ Force flush
                 elif data.get('progress'):
                     await tracker.emit_build_progress(data['progress'])
+                    await asyncio.sleep(0)  # ✅ Force flush
+                
+                # ✅ CRITICAL: Also send direct progress messages
+                if data.get('message'):
+                    await self._send_progress_message(data['message'])
+                    await asyncio.sleep(0)  # ✅ Force flush
             
             # ✅ PHASE 2: Use resilient build with retry logic
             build_result = await self.gcloud_service.build_image(
@@ -1095,9 +1102,15 @@ Env vars auto-parsed from .env. Never clone twice.
             deploy_start = time.time()
             
             async def deploy_progress(data):
-                """Forward deployment progress to tracker"""
+                """Forward deployment progress to tracker - REAL-TIME"""
                 if data.get('status'):
                     await tracker.emit_deployment_status(data['status'])
+                    await asyncio.sleep(0)  # ✅ Force flush
+                
+                # ✅ CRITICAL: Also send direct progress messages
+                if data.get('message'):
+                    await self._send_progress_message(data['message'])
+                    await asyncio.sleep(0)  # ✅ Force flush
             
             # Add resource configuration to deployment
             deploy_env = env_vars or {}
