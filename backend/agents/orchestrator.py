@@ -299,18 +299,22 @@ Env vars auto-parsed from .env. Never clone twice.
                     
                     try:
                         import google.generativeai as genai
+                        # ✅ CRITICAL: Re-configure with API key to ensure clean state
                         genai.configure(api_key=self.gemini_api_key)
                         
                         # ✅ CRITICAL FIX: Use model name WITHOUT "models/" prefix for v1beta API
-                        # SDK 0.8.5 v1beta expects: "gemini-1.5-flash" NOT "models/gemini-1.5-flash"
+                        # The google-generativeai SDK 0.8.5 uses v1beta endpoint
+                        # v1beta expects: "gemini-1.5-flash" NOT "models/gemini-1.5-flash"
+                        # Reference: https://ai.google.dev/gemini-api/docs/models/gemini
                         backup_model = genai.GenerativeModel(
-                            'gemini-1.5-flash',  # ✅ Correct: No prefix for v1beta API
-                            tools=[self._get_function_declarations_genai()],
-                            system_instruction=self.model._system_instruction if hasattr(self.model, '_system_instruction') else None
+                            model_name='gemini-1.5-flash',  # ✅ Explicit parameter name, no prefix
+                            tools=[self._get_function_declarations_genai()]
                         )
                         
-                        # Create new chat session with backup model
+                        # Create FRESH chat session (no history to avoid model name conflicts)
                         backup_chat = backup_model.start_chat(history=[])
+                        
+                        # Send message with fresh session
                         response = backup_chat.send_message(message)
                         
                         # Switch permanently to Gemini API
