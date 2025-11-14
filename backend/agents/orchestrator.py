@@ -93,7 +93,7 @@ Env vars auto-parsed from .env. Never clone twice.
             # ✅ Gemini API with SDK 0.8.5 (stable)
             import google.generativeai as genai
             self.model = genai.GenerativeModel(
-                'gemini-1.5-flash',  # ✅ No 'models/' prefix needed
+                'gemini-1.5-flash-latest',  # ✅ FIXED: Use -latest suffix for v1beta API
                 tools=[self._get_function_declarations_genai()],
                 system_instruction=system_instruction
             )
@@ -302,12 +302,14 @@ Env vars auto-parsed from .env. Never clone twice.
                         # ✅ CRITICAL: Re-configure with API key to ensure clean state
                         genai.configure(api_key=self.gemini_api_key)
                         
-                        # ✅ CRITICAL FIX: Use model name WITHOUT "models/" prefix for v1beta API
-                        # The google-generativeai SDK 0.8.5 uses v1beta endpoint
-                        # v1beta expects: "gemini-1.5-flash" NOT "models/gemini-1.5-flash"
-                        # Reference: https://ai.google.dev/gemini-api/docs/models/gemini
+                        # ✅ CRITICAL FIX: Use correct model name for v1beta API
+                        # Available models in v1beta:
+                        # - gemini-1.5-flash-latest (recommended)
+                        # - gemini-1.5-pro-latest
+                        # - gemini-1.0-pro-latest
+                        # NOT available: gemini-1.5-flash (without -latest suffix)
                         backup_model = genai.GenerativeModel(
-                            model_name='gemini-1.5-flash',  # ✅ Explicit parameter name, no prefix
+                            model_name='gemini-1.5-flash-latest',  # ✅ FIXED: Must use -latest suffix
                             tools=[self._get_function_declarations_genai()]
                         )
                         
