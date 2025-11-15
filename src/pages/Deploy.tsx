@@ -37,8 +37,23 @@ const Deploy = () => {
   // Check if analysis is complete and waiting for deployment confirmation
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
-    if (lastMessage?.content.toLowerCase().includes('are you ready to deploy')) {
-      setShowDeployActions(true);
+    if (lastMessage?.content) {
+      const content = lastMessage.content.toLowerCase();
+      // Check for various deployment confirmation prompts
+      const deploymentPrompts = [
+        'are you ready to deploy',
+        'would you like me to proceed',
+        'ready to deploy',
+        'proceed with the deployment',
+        'shall i deploy',
+        'deploy to cloud run?'
+      ];
+      
+      const shouldShowActions = deploymentPrompts.some(prompt => 
+        content.includes(prompt)
+      );
+      
+      setShowDeployActions(shouldShowActions);
     }
   }, [messages]);
 
