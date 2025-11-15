@@ -24,6 +24,7 @@ const Deploy = () => {
   
   const [selectedRepo, setSelectedRepo] = useState<{ url: string; branch: string } | null>(null);
   const [deploymentUrl, setDeploymentUrl] = useState<string | undefined>();
+  const [showDeployActions, setShowDeployActions] = useState(false);
 
   // Extract deployment URL from messages
   useEffect(() => {
@@ -32,6 +33,31 @@ const Deploy = () => {
       setDeploymentUrl(completeMessage.deploymentUrl);
     }
   }, [messages]);
+
+  // Check if analysis is complete and waiting for deployment confirmation
+  useEffect(() => {
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage?.content.toLowerCase().includes('are you ready to deploy')) {
+      setShowDeployActions(true);
+    }
+  }, [messages]);
+
+  const handleProceedDeployment = () => {
+    if (!isWSConnected) {
+      toast.error('Backend connection lost');
+      return;
+    }
+    
+    setShowDeployActions(false);
+    sendMessage('yes', { action: 'confirm_deploy' });
+    toast.success('Deployment started!');
+  };
+
+  const handleCancelDeployment = () => {
+    setShowDeployActions(false);
+    sendMessage('no', { action: 'cancel_deploy' });
+    toast.info('Deployment cancelled');
+  };
 
   const handleSelectRepo = async (repoUrl: string, branch: string) => {
     if (!isWSConnected) {
@@ -158,11 +184,43 @@ const Deploy = () => {
 
           {/* Deployment Progress & Results */}
           {selectedRepo && (
-            <DeploymentProgress 
-              messages={messages}
-              isTyping={isTyping}
-              deploymentUrl={deploymentUrl}
-            />
+            <>
+              <DeploymentProgress 
+                messages={messages}
+                isTyping={isTyping}
+                deploymentUrl={deploymentUrl}
+              />
+              
+              {/* Deployment Action Buttons */}
+              {showDeployActions && (
+                <Card className="border-primary/20 bg-primary/5">
+                  <CardContent className="pt-6">
+                    <div className="flex flex-col items-center gap-4">
+                      <p className="text-center text-muted-foreground">
+                        Analysis complete! Ready to deploy to Cloud Run?
+                      </p>
+                      <div className="flex gap-3">
+                        <Button
+                          onClick={handleProceedDeployment}
+                          size="lg"
+                          className="gap-2"
+                        >
+                          <Rocket className="w-4 h-4" />
+                          Deploy Now
+                        </Button>
+                        <Button
+                          onClick={handleCancelDeployment}
+                          variant="outline"
+                          size="lg"
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </>
           )}
 
           {/* Help Card - Only show if no repo selected */}
