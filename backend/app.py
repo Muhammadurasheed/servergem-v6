@@ -413,9 +413,20 @@ All secrets will be stored securely in Google Secret Manager.
             # Handle chat messages
             if msg_type == 'message':
                 message = data.get('message')
+                metadata = data.get('metadata', {})  # ✅ Extract metadata
                 
                 if not message:
                     continue
+                
+                # ✅ CRITICAL FIX: Update GitHub token from metadata if provided
+                # This is sent from Deploy.tsx when selecting a repo
+                github_token = metadata.get('githubToken')
+                if github_token:
+                    print(f"[WebSocket] 🔑 Updating GitHub token for session {session_id}")
+                    # Update the orchestrator's GitHub service with the new token
+                    from services.github_service import GitHubService
+                    user_orchestrator.github_service = GitHubService(github_token)
+                    print(f"[WebSocket] ✅ GitHub token updated successfully")
                 
                 # Typing indicator
                 await safe_send_json(session_id, {
